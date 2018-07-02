@@ -36,10 +36,9 @@
 
 #include "sdkconfig.h"
 
+#include "eeprom_config.h"
 
 #include "sample_capture.h"
-#undef LOG_LOCAL_LEVEL
-#define LOG_LOCAL_LEVEL 4
 #define GATTS_TAG "GATTS_DEMO"
 
 /* Can run 'make menuconfig' to choose the GPIO to blink,
@@ -49,8 +48,9 @@
 //#define BLINK_GPIO CONFIG_BLINK_GPIO
 //
 //JC:editing the line 
+//ERROR: the tx0 rx0 are used for the usb
 #undef BLINK_GPIO
-#define BLINK_GPIO 1 
+#define BLINK_GPIO 21 
 
 ///Declare the static function
 static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param);
@@ -319,7 +319,6 @@ void example_exec_write_event_env(prepare_type_env_t *prepare_write_env, esp_ble
 static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param) {
     switch (event) {
     case ESP_GATTS_REG_EVT:
-        activate_adc();
         ESP_LOGI(GATTS_TAG, "REGISTER_APP_EVT, status %d, app_id %d\n", param->reg.status, param->reg.app_id);
         gl_profile_tab[PROFILE_A_APP_ID].service_id.is_primary = true;
         gl_profile_tab[PROFILE_A_APP_ID].service_id.id.inst_id = 0x00;
@@ -385,6 +384,10 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
             uint16_t descr_value = param->write.value[1]<<8 | param->write.value[0];
             gpio_set_level(BLINK_GPIO, descr_value > 0 ? 1 : 0);
 
+            int profile_result = set_profile(descr_value);
+
+            ESP_LOGI(GATTS_TAG, "profile write to %d status: %d",
+                               descr_value, profile_result);
             if (gl_profile_tab[PROFILE_A_APP_ID].descr_handle == param->write.handle && param->write.len == 2){
                 if (descr_value == 0x0001){
                     if (a_property & ESP_GATT_CHAR_PROP_BIT_NOTIFY){
@@ -705,26 +708,23 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
 
 void app_main()
 {
+    ESP_LOGI(GATTS_TAG, "app begin\n");
     esp_err_t ret;
-
     // Initialize NVS.
     ret = nvs_flash_init();
+
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES) {
         ESP_ERROR_CHECK(nvs_flash_erase());
         ret = nvs_flash_init();
     }
-
-
-    //ripping this 
-    gpio_pad_select_gpio(BLINK_GPIO);
-    /* Set the GPIO as a push/pull output */
-    gpio_set_direction(BLINK_GPIO, GPIO_MODE_OUTPUT);
-
-
-
-
     ESP_ERROR_CHECK( ret );
     ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT));
+
+
+    ESP_LOGI(GATTS_TAG, "flash finished\n");
+
+
+
 
     esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
     ret = esp_bt_controller_init(&bt_cfg);
@@ -774,5 +774,12 @@ void app_main()
         ESP_LOGE(GATTS_TAG, "set local  MTU failed, error code = %x", local_mtu_ret);
     }
 
+
+    //ripping this 
+    gpio_pad_select_gpio(BLINK_GPIO);
+    /* Set the GPIO as a push/pull output */
+    gpio_set_direction(BLINK_GPIO, GPIO_MODE_OUTPUT);
+    ESP_LOGI(GATTS_TAG, "starting eeprom task\n");
+    eeprom_init(0);
     return;
 }
