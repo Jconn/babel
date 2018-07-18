@@ -1,3 +1,5 @@
+
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -7,6 +9,17 @@
 #include "sample_capture.h"
 #include "mcp9700_temp.h"
 #include "df_robot_soil.h"
+#include "bmp280.h"
+
+#include "esp_bt.h"
+#include "esp_gap_ble_api.h"
+#include "esp_gatts_api.h"
+#include "esp_bt_defs.h"
+#include "esp_bt_main.h"
+#include "esp_bt_main.h"
+#include "esp_gatt_common_api.h"
+#include "gatts_demo.h"
+
 
 #define EEPROM_I2C_ADDR (0x54)
 
@@ -17,19 +30,17 @@
 #define PROFILE_LEN 4
 
 
+#define GATTS_SERVICE_UUID_TEST_B   0x00EE
+#define GATTS_CHAR_UUID_TEST_B      0xEE01
+#define GATTS_DESCR_UUID_TEST_B     0x2222
+#define GATTS_NUM_HANDLE_TEST_B     4
 /*
  - master:
  *    GPIO18 is assigned as the data signal of i2c master port
  *    GPIO19 is assigned as the clock signal of i2c master port
  *
 */
-#define DATA_LENGTH                        512              /*!<Data buffer length for test buffer*/
-#define RW_TEST_LENGTH                     129              /*!<Data length for r/w test, any value from 0-DATA_LENGTH*/
-#define DELAY_TIME_BETWEEN_ITEMS_MS        1234             /*!< delay time between different test items */
 
-#define I2C_EXAMPLE_SLAVE_NUM              I2C_NUM_0        /*!<I2C port number for slave dev */
-#define I2C_EXAMPLE_SLAVE_TX_BUF_LEN       (2*DATA_LENGTH)  /*!<I2C slave tx buffer size */
-#define I2C_EXAMPLE_SLAVE_RX_BUF_LEN       (2*DATA_LENGTH)  /*!<I2C slave rx buffer size */
 
 #define I2C_EXAMPLE_MASTER_SCL_IO          19               /*!< gpio number for I2C master clock */
 #define I2C_EXAMPLE_MASTER_SDA_IO          18               /*!< gpio number for I2C master data  */
@@ -38,15 +49,6 @@
 #define I2C_EXAMPLE_MASTER_RX_BUF_DISABLE  0                /*!< I2C master do not need buffer */
 #define I2C_EXAMPLE_MASTER_FREQ_HZ         100000           /*!< I2C master clock frequency */
 
-#define BH1750_SENSOR_ADDR                 0x23             /*!< slave address for BH1750 sensor */
-#define BH1750_CMD_START                   0x23             /*!< Command to set measure mode */
-#define ESP_SLAVE_ADDR                     0x28             /*!< ESP32 slave address, you can set any 7bit value */
-#define WRITE_BIT                          0 /*!< I2C master write */
-#define READ_BIT                           1  /*!< I2C master read */
-#define ACK_CHECK_EN                       0x1              /*!< I2C master will check ack from slave*/
-#define ACK_CHECK_DIS                      0x0              /*!< I2C master will not check ack from slave */
-#define ACK_VAL                            0x0              /*!< I2C ack value */
-#define NACK_VAL                           0x1              /*!< I2C nack value */
 
 
 //
@@ -56,13 +58,16 @@
 //                      of the page
 //
 
+char* EEPROM_TAG = "eeprom";
 
+static prepare_type_env_t b_prepare_write_env;
 
 static void i2c_example_master_init(void);
 static void eeprom_poll(void* arg);
 static void deserialize_u32(uint8_t*in , uint32_t *out);
 static void serialize_u32(uint8_t*out , uint32_t in);
 static int32_t eeprom_profile = -1;
+esp_gatt_char_prop_t b_property = 0;
 
 int32_t get_cached_profile(void)
 {
@@ -83,6 +88,10 @@ static void activate_profile(int32_t profile)
             break;
         case SENS_MAG_FIELD_ANALOG:
             ESP_LOGI("eeprom", "activating mag sensor"); 
+            break;
+        case SENS_BMP_280:
+            ESP_LOGI("eeprom", "activating bmp 280"); 
+            activate_bmp280(get_active_sensor());
             break;
         default:
             ESP_LOGI("eeprom", "unknown profile"); 
@@ -233,6 +242,155 @@ static void eeprom_poll(void* arg)
     }
 }
 
+
+void eeprom_bt_profile(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param, struct gatts_profile_inst *profile)
+{
+    switch (event) {
+    case ESP_GATTS_REG_EVT:
+        ESP_LOGI(EEPROM_TAG, "REGISTER_APP_EVT, status %d, app_id %d\n", param->reg.status, param->reg.app_id);
+        profile->service_id.is_primary = true;
+        profile->service_id.id.inst_id = 0x00;
+        profile->service_id.id.uuid.len = ESP_UUID_LEN_16;
+        profile->service_id.id.uuid.uuid.uuid16 = GATTS_SERVICE_UUID_TEST_B;
+
+        esp_ble_gatts_create_service(gatts_if, &profile->service_id, GATTS_NUM_HANDLE_TEST_B);
+        break;
+    case ESP_GATTS_READ_EVT: {
+        ESP_LOGI(EEPROM_TAG, "GATT_READ_EVT, conn_id %d, trans_id %d, handle %d\n", param->read.conn_id, param->read.trans_id, param->read.handle);
+        esp_gatt_rsp_t rsp;
+        memset(&rsp, 0, sizeof(esp_gatt_rsp_t));
+        rsp.attr_value.handle = param->read.handle;
+        int32_t profile = get_cached_profile();
+        rsp.attr_value.len = 4;
+        serialize_u32(rsp.attr_value.value, profile);
+        esp_ble_gatts_send_response(gatts_if, param->read.conn_id, param->read.trans_id,
+                                    ESP_GATT_OK, &rsp);
+        break;
+    }
+    case ESP_GATTS_WRITE_EVT: {
+        ESP_LOGI(EEPROM_TAG, "GATT_WRITE_EVT, conn_id %d, trans_id %d, handle %d\n", param->write.conn_id, param->write.trans_id, param->write.handle);
+        if (!param->write.is_prep){
+            ESP_LOGI(EEPROM_TAG, "GATT_WRITE_EVT, value len %d, value :", param->write.len);
+            esp_log_buffer_hex(EEPROM_TAG, param->write.value, param->write.len);
+
+            uint16_t descr_value= param->write.value[1]<<8 | param->write.value[0];
+            
+            int profile_result = set_profile(descr_value);
+
+            ESP_LOGI(EEPROM_TAG, "profile write to %d status: %d",
+                               descr_value, profile_result);
+            if (profile->descr_handle == param->write.handle && param->write.len == 2){
+                if (descr_value == 0x0001){
+                    if (b_property & ESP_GATT_CHAR_PROP_BIT_NOTIFY){
+                        ESP_LOGI(EEPROM_TAG, "notify enable");
+                        uint8_t notify_data[15];
+                        for (int i = 0; i < sizeof(notify_data); ++i)
+                        {
+                            notify_data[i] = i%0xff;
+                        }
+                        //the size of notify_data[] need less than MTU size
+                        esp_ble_gatts_send_indicate(gatts_if, param->write.conn_id, profile->char_handle,
+                                                sizeof(notify_data), notify_data, false);
+                    }
+                }else if (descr_value == 0x0002){
+                    if (b_property & ESP_GATT_CHAR_PROP_BIT_INDICATE){
+                        ESP_LOGI(EEPROM_TAG, "indicate enable");
+                        uint8_t indicate_data[15];
+                        for (int i = 0; i < sizeof(indicate_data); ++i)
+                        {
+                            indicate_data[i] = i%0xff;
+                        }
+                        //the size of indicate_data[] need less than MTU size
+                        esp_ble_gatts_send_indicate(gatts_if, param->write.conn_id, profile->char_handle,
+                                                sizeof(indicate_data), indicate_data, true);
+                    }
+                }
+                else if (descr_value == 0x0000){
+                    ESP_LOGI(EEPROM_TAG, "notify/indicate disable ");
+                }else{
+                    ESP_LOGE(EEPROM_TAG, "unknown value");
+                }
+
+            }
+        }
+        example_write_event_env(gatts_if, &b_prepare_write_env, param);
+        break;
+    }
+    case ESP_GATTS_EXEC_WRITE_EVT:
+        ESP_LOGI(EEPROM_TAG,"ESP_GATTS_EXEC_WRITE_EVT");
+        esp_ble_gatts_send_response(gatts_if, param->write.conn_id, param->write.trans_id, ESP_GATT_OK, NULL);
+        example_exec_write_event_env(&b_prepare_write_env, param);
+        break;
+    case ESP_GATTS_MTU_EVT:
+        ESP_LOGI(EEPROM_TAG, "ESP_GATTS_MTU_EVT, MTU %d", param->mtu.mtu);
+        break;
+    case ESP_GATTS_UNREG_EVT:
+        break;
+    case ESP_GATTS_CREATE_EVT:
+        ESP_LOGI(EEPROM_TAG, "CREATE_SERVICE_EVT, status %d,  service_handle %d\n", param->create.status, param->create.service_handle);
+        profile->service_handle = param->create.service_handle;
+        profile->char_uuid.len = ESP_UUID_LEN_16;
+        profile->char_uuid.uuid.uuid16 = GATTS_CHAR_UUID_TEST_B;
+
+        esp_ble_gatts_start_service(profile->service_handle);
+        b_property = ESP_GATT_CHAR_PROP_BIT_READ | ESP_GATT_CHAR_PROP_BIT_WRITE | ESP_GATT_CHAR_PROP_BIT_NOTIFY;
+        esp_err_t add_char_ret =esp_ble_gatts_add_char( profile->service_handle, &profile->char_uuid,
+                                                        ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE,
+                                                        b_property,
+                                                        NULL, NULL);
+        if (add_char_ret){
+            ESP_LOGE(EEPROM_TAG, "add char failed, error code =%x",add_char_ret);
+        }
+        break;
+    case ESP_GATTS_ADD_INCL_SRVC_EVT:
+        break;
+    case ESP_GATTS_ADD_CHAR_EVT:
+        ESP_LOGI(EEPROM_TAG, "ADD_CHAR_EVT, status %d,  attr_handle %d, service_handle %d\n",
+                 param->add_char.status, param->add_char.attr_handle, param->add_char.service_handle);
+
+        profile->char_handle = param->add_char.attr_handle;
+        profile->descr_uuid.len = ESP_UUID_LEN_16;
+        profile->descr_uuid.uuid.uuid16 = ESP_GATT_UUID_CHAR_CLIENT_CONFIG;
+        esp_ble_gatts_add_char_descr(profile->service_handle, &profile->descr_uuid,
+                                     ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE,
+                                     NULL, NULL);
+        break;
+    case ESP_GATTS_ADD_CHAR_DESCR_EVT:
+        profile->descr_handle = param->add_char_descr.attr_handle;
+        ESP_LOGI(EEPROM_TAG, "ADD_DESCR_EVT, status %d, attr_handle %d, service_handle %d\n",
+                 param->add_char_descr.status, param->add_char_descr.attr_handle, param->add_char_descr.service_handle);
+        break;
+    case ESP_GATTS_DELETE_EVT:
+        break;
+    case ESP_GATTS_START_EVT:
+        ESP_LOGI(EEPROM_TAG, "SERVICE_START_EVT, status %d, service_handle %d\n",
+                 param->start.status, param->start.service_handle);
+        break;
+    case ESP_GATTS_STOP_EVT:
+        break;
+    case ESP_GATTS_CONNECT_EVT:
+        ESP_LOGI(EEPROM_TAG, "CONNECT_EVT, conn_id %d, remote %02x:%02x:%02x:%02x:%02x:%02x:",
+                 param->connect.conn_id,
+                 param->connect.remote_bda[0], param->connect.remote_bda[1], param->connect.remote_bda[2],
+                 param->connect.remote_bda[3], param->connect.remote_bda[4], param->connect.remote_bda[5]);
+        profile->conn_id = param->connect.conn_id;
+        break;
+    case ESP_GATTS_CONF_EVT:
+        ESP_LOGI(EEPROM_TAG, "ESP_GATTS_CONF_EVT status %d", param->conf.status);
+        if (param->conf.status != ESP_GATT_OK){
+            esp_log_buffer_hex(EEPROM_TAG, param->conf.value, param->conf.len);
+        }
+    break;
+    case ESP_GATTS_DISCONNECT_EVT:
+    case ESP_GATTS_OPEN_EVT:
+    case ESP_GATTS_CANCEL_OPEN_EVT:
+    case ESP_GATTS_CLOSE_EVT:
+    case ESP_GATTS_LISTEN_EVT:
+    case ESP_GATTS_CONGEST_EVT:
+    default:
+        break;
+    }
+}
 
 
 
