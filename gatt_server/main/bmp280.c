@@ -6,7 +6,8 @@
 #include "driver/i2c.h"
 #include "sample_capture.h"
 #include "eeprom_config.h"
-
+#include "sensor_drive_constructor.h"
+#include "bmp280.h"
 /*
  - master:
  *    GPIO14 is assigned as the data signal of i2c master port
@@ -25,19 +26,9 @@
 
 #define BMP_CALIBRATION_LENGTH (24)
 
-#define I2C_EXAMPLE_MASTER_SCL_IO          26               /*!< gpio number for I2C master clock */
-#define I2C_EXAMPLE_MASTER_SDA_IO          27               /*!< gpio number for I2C master data  */
-
-#define BMP_280_PORT             I2C_NUM_0        /*!< I2C port number for master dev */
-
-#define I2C_EXAMPLE_MASTER_TX_BUF_DISABLE  0                /*!< I2C master do not need buffer */
-#define I2C_EXAMPLE_MASTER_RX_BUF_DISABLE  0                /*!< I2C master do not need buffer */
-#define I2C_EXAMPLE_MASTER_FREQ_HZ         100000           /*!< I2C master clock frequency */
-
 static uint16_t deserialize_u16(uint8_t *buffer);
 static int16_t deserialize_i16(uint8_t *buffer);
 
-static void i2c_example_master_init(void);
 static int32_t calibrate_temp(uint32_t raw_temp, int32_t *t_fine);
 static uint32_t calibrate_pressure(uint32_t raw_press, int32_t t_fine);
 
@@ -72,7 +63,7 @@ static int16_t deserialize_i16(uint8_t *buffer)
 
 static void initBMP280(void)
 {
-    i2c_example_master_init();
+    i2c_sensor_init();
     //
     //top 3 bits are for pressure
     //next 3 bits are for temperature
@@ -88,21 +79,6 @@ static void initBMP280(void)
 }
 
 
-static void i2c_example_master_init(void)
-{
-    int i2c_master_port = BMP_280_PORT;
-    i2c_config_t conf;
-    conf.mode = I2C_MODE_MASTER;
-    conf.sda_io_num = I2C_EXAMPLE_MASTER_SDA_IO;
-    conf.sda_pullup_en = GPIO_PULLUP_ENABLE;
-    conf.scl_io_num = I2C_EXAMPLE_MASTER_SCL_IO;
-    conf.scl_pullup_en = GPIO_PULLUP_ENABLE;
-    conf.master.clk_speed = I2C_EXAMPLE_MASTER_FREQ_HZ;
-    i2c_param_config(i2c_master_port, &conf);
-    i2c_driver_install(i2c_master_port, conf.mode,
-                       I2C_EXAMPLE_MASTER_RX_BUF_DISABLE,
-                       I2C_EXAMPLE_MASTER_TX_BUF_DISABLE, 0);
-}
 
 static uint32_t calibrate_pressure(uint32_t raw_press, int32_t t_fine)
 {

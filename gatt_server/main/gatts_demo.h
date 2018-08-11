@@ -21,9 +21,10 @@
 
 #include "sdkconfig.h"
 
-#define PROFILE_NUM 2
+#define PROFILE_NUM 3 
 #define PROFILE_A_APP_ID 0
 #define PROFILE_B_APP_ID 1
+#define PROFILE_C_APP_ID 2
 
 struct gatts_profile_inst {
     esp_gatts_cb_t gatts_cb;

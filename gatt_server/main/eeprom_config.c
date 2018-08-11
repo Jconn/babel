@@ -10,6 +10,7 @@
 #include "mcp9700_temp.h"
 #include "df_robot_soil.h"
 #include "bmp280.h"
+#include "sensor_drive_constructor.h"
 
 #include "esp_bt.h"
 #include "esp_gap_ble_api.h"
@@ -21,12 +22,12 @@
 #include "gatts_demo.h"
 
 
-#define EEPROM_I2C_ADDR (0x54)
+#define EEPROM_I2C_ADDR (0x50)
 
 //
 //defines the location in eeprom of the sensor profile we're dealing with
 //
-#define PROFILE_ADDR 0
+#define PROFILE_ADDR 0 
 #define PROFILE_LEN 4
 
 
@@ -67,13 +68,14 @@ static void eeprom_poll(void* arg);
 static void deserialize_u32(uint8_t*in , uint32_t *out);
 static void serialize_u32(uint8_t*out , uint32_t in);
 static int32_t eeprom_profile = -1;
+static int32_t s_eeprom_read_page = 0;
 esp_gatt_char_prop_t b_property = 0;
 
 int32_t get_cached_profile(void)
 {
     return eeprom_profile;
 }
-
+/*
 static void activate_profile(int32_t profile)
 {
     switch(profile)
@@ -98,31 +100,34 @@ static void activate_profile(int32_t profile)
             break;
     }
 }
-
+*/
 esp_err_t eeprom_read(uint8_t page_addr, int length, uint8_t* outBuffer)
 {
     i2c_cmd_handle_t cmd = i2c_cmd_link_create();
     //start condition
     i2c_master_start(cmd);
 
+
+    uint8_t i2c_addr = EEPROM_I2C_ADDR | (page_addr/16);
+
     //addr write
     i2c_master_write_byte(cmd,
-                    (EEPROM_I2C_ADDR << 1 ) | WRITE_BIT, ACK_CHECK_EN);
+                    (i2c_addr << 1 ) | WRITE_BIT, ACK_CHECK_EN);
     //setting page addr
-    i2c_master_write_byte(cmd, page_addr, ACK_CHECK_EN);
+    i2c_master_write_byte(cmd, (page_addr % 16) * 16, ACK_CHECK_EN);
     
     //repeated start condition for next txn 
     i2c_master_start(cmd);
     
     //addr write for the read txn 
     i2c_master_write_byte(cmd,
-                    (EEPROM_I2C_ADDR << 1 ) | READ_BIT, ACK_CHECK_EN);
+                    (i2c_addr << 1 ) | READ_BIT, ACK_CHECK_EN);
 
     //the eeprom datasheet specs that ACK is required on 
     //all bytes, not just the first n-1 bytes
     //read bytes
-    i2c_master_read(cmd, outBuffer, length, ACK_VAL);
-//    i2c_master_read_byte(cmd, &(outBuffer[length-1]), NACK_VAL);
+    i2c_master_read(cmd, outBuffer, length-1, ACK_VAL);
+    i2c_master_read_byte(cmd, &(outBuffer[length-1]), NACK_VAL);
 //
     //final stop condition
     i2c_master_stop(cmd);
@@ -136,13 +141,24 @@ esp_err_t eeprom_read(uint8_t page_addr, int length, uint8_t* outBuffer)
 
 esp_err_t eeprom_write(uint8_t page_addr, int length, uint8_t* inBuffer)
 {
+    ESP_LOGI(EEPROM_TAG, "eWrite: page %d, len %d, value: ", page_addr, length); 
+    
+    //
+    // there are 8 sections of 256 bytes 
+    // so only 16 pages per section
+    // the api to this eeprom abstracts this away
+    //
+    uint8_t i2c_addr = EEPROM_I2C_ADDR | (page_addr/16);
+    esp_log_buffer_hex(EEPROM_TAG, inBuffer, length);
     i2c_cmd_handle_t cmd = i2c_cmd_link_create();
     i2c_master_start(cmd);
     i2c_master_write_byte(cmd,
-            (EEPROM_I2C_ADDR << 1 ) | WRITE_BIT, ACK_CHECK_EN);
+            (i2c_addr << 1 ) | WRITE_BIT, ACK_CHECK_EN);
 
-    i2c_master_write_byte(cmd, page_addr, ACK_CHECK_EN);
+    //the entire block is the word
+    i2c_master_write_byte(cmd, 16 * (page_addr%16), ACK_CHECK_EN);
     i2c_master_write(cmd, inBuffer, length, ACK_CHECK_EN);
+
     i2c_master_stop(cmd);
 
     esp_err_t ret = i2c_master_cmd_begin(
@@ -233,11 +249,11 @@ static void eeprom_poll(void* arg)
         int32_t current_profile = get_eeprom_profile();
         if(current_profile != eeprom_profile)
         {
-            activate_profile(current_profile); 
+            activate_profile(); 
         }
         eeprom_profile = current_profile;
 
-        ESP_LOGI("eeprom", "current profile: %d\n", eeprom_profile); 
+        ESP_LOGI("eeprom", "sensor family: %d\n", eeprom_profile); 
         vTaskDelay(1000/ portTICK_RATE_MS);
     }
 }
@@ -256,13 +272,17 @@ void eeprom_bt_profile(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_b
         esp_ble_gatts_create_service(gatts_if, &profile->service_id, GATTS_NUM_HANDLE_TEST_B);
         break;
     case ESP_GATTS_READ_EVT: {
-        ESP_LOGI(EEPROM_TAG, "GATT_READ_EVT, conn_id %d, trans_id %d, handle %d\n", param->read.conn_id, param->read.trans_id, param->read.handle);
+        ESP_LOGI(EEPROM_TAG, "eeprom page read evt(%d), conn_id %d, trans_id %d, handle %d\n",s_eeprom_read_page, param->read.conn_id, param->read.trans_id, param->read.handle);
         esp_gatt_rsp_t rsp;
         memset(&rsp, 0, sizeof(esp_gatt_rsp_t));
         rsp.attr_value.handle = param->read.handle;
-        int32_t profile = get_cached_profile();
-        rsp.attr_value.len = 4;
-        serialize_u32(rsp.attr_value.value, profile);
+        //return the page that was read, and the whole eeprom page
+        rsp.attr_value.value[0] = s_eeprom_read_page;
+        eeprom_read(s_eeprom_read_page, 16, rsp.attr_value.value + 1);
+        rsp.attr_value.len = 17;
+        //int32_t profile = get_cached_profile();
+        //rsp.attr_value.len = 4;
+        //serialize_u32(rsp.attr_value.value, profile);
         esp_ble_gatts_send_response(gatts_if, param->read.conn_id, param->read.trans_id,
                                     ESP_GATT_OK, &rsp);
         break;
@@ -275,10 +295,6 @@ void eeprom_bt_profile(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_b
 
             uint16_t descr_value= param->write.value[1]<<8 | param->write.value[0];
             
-            int profile_result = set_profile(descr_value);
-
-            ESP_LOGI(EEPROM_TAG, "profile write to %d status: %d",
-                               descr_value, profile_result);
             if (profile->descr_handle == param->write.handle && param->write.len == 2){
                 if (descr_value == 0x0001){
                     if (b_property & ESP_GATT_CHAR_PROP_BIT_NOTIFY){
@@ -312,10 +328,51 @@ void eeprom_bt_profile(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_b
                 }
 
             }
+            else
+            {
+                if(param->write.len !=0)
+                {
+
+                    int command = param->write.value[0];   
+                    int page = param->write.value[1];
+                    switch(command)
+                    {
+                        //write 
+                        case 1:
+                        {
+                            int len = param->write.value[2];
+                            if(len > 16)
+                            {
+                                ESP_LOGI(EEPROM_TAG, "len too big: %d",len);
+                                break;
+                            }
+                            if(param->write.len - 3 != len)
+                            {
+                                ESP_LOGI(EEPROM_TAG, "len mismatch, %d expected %d", param->write.len, len+2);
+                                break;
+                            }
+                            ESP_LOGI(EEPROM_TAG, "eeprom page %d write len %d",page, len);
+                            //write the eeprom page 
+                            eeprom_write(page, len, &(param->write.value[3])); 
+                        }
+                            break;
+                        //read
+                        case 2:
+                            //set up for a read - if this characteristic is read
+                            //then trigger an eeprom read to the page
+                            s_eeprom_read_page = page;
+                            break;
+                        default:
+                            ESP_LOGI(EEPROM_TAG, "unknown command: %d",command);
+                            break;
+                    }
+                }
+            }
+            
         }
         example_write_event_env(gatts_if, &b_prepare_write_env, param);
         break;
-    }
+                              }
     case ESP_GATTS_EXEC_WRITE_EVT:
         ESP_LOGI(EEPROM_TAG,"ESP_GATTS_EXEC_WRITE_EVT");
         esp_ble_gatts_send_response(gatts_if, param->write.conn_id, param->write.trans_id, ESP_GATT_OK, NULL);

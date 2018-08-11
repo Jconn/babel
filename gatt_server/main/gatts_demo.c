@@ -41,7 +41,8 @@
 #include "eeprom_config.h"
 
 #include "sample_capture.h"
-
+#include "sensor_drive_constructor.h"
+#include "serial_driver.h"
 /* Can run 'make menuconfig' to choose the GPIO to blink,
    or you can edit the following line and set a number here.
 */
@@ -59,6 +60,8 @@
 static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param); 
 ///Declare the static function
 static void gatts_profile_b_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param);
+
+static void gatts_profile_c_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param); 
 
 #define GATTS_SERVICE_UUID_TEST_A   0x00FF
 #define GATTS_CHAR_UUID_TEST_A      0xFF01
@@ -163,6 +166,10 @@ static struct gatts_profile_inst gl_profile_tab[PROFILE_NUM] = {
     },
     [PROFILE_B_APP_ID] = {
         .gatts_cb = gatts_profile_b_event_handler,                   /* This demo does not implement, similar as profile A */
+        .gatts_if = ESP_GATT_IF_NONE,       /* Not get the gatt_if, so initial is ESP_GATT_IF_NONE */
+    },
+    [PROFILE_C_APP_ID] = {
+        .gatts_cb = gatts_profile_c_event_handler,                   /* This demo does not implement, similar as profile A */
         .gatts_if = ESP_GATT_IF_NONE,       /* Not get the gatt_if, so initial is ESP_GATT_IF_NONE */
     },
 };
@@ -337,9 +344,9 @@ void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gat
         esp_gatt_rsp_t rsp;
         memset(&rsp, 0, sizeof(esp_gatt_rsp_t));
         rsp.attr_value.handle = param->read.handle;
-        char raw_data[100];
+        uint8_t raw_data[100];
         int sample_len = 0;
-        sample_len = getProcessedSample(raw_data);
+        sample_len = get_sensor(raw_data);
         rsp.attr_value.len = sample_len;
         printf("got sample of length %d\n", sample_len);
         for(int i = 0; i < sample_len; ++i)
@@ -500,6 +507,12 @@ void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gat
         break;
     }
 }
+static void gatts_profile_c_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param) {
+    serial_driver_profile(event, 
+            gatts_if,
+            param,
+            &(gl_profile_tab[PROFILE_C_APP_ID]) );
+}
 
 static void gatts_profile_b_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param) {
     eeprom_bt_profile(event, 
@@ -593,6 +606,11 @@ static void configure_subsystems(void)
         return;
     }
     ret = esp_ble_gatts_app_register(PROFILE_B_APP_ID);
+    if (ret){
+        ESP_LOGE(GATTS_TAG, "gatts app register error, error code = %x", ret);
+        return;
+    }
+    ret = esp_ble_gatts_app_register(PROFILE_C_APP_ID);
     if (ret){
         ESP_LOGE(GATTS_TAG, "gatts app register error, error code = %x", ret);
         return;
