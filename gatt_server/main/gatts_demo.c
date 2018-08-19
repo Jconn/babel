@@ -43,6 +43,7 @@
 #include "sample_capture.h"
 #include "sensor_drive_constructor.h"
 #include "serial_driver.h"
+#include "bt_app_core.h"
 /* Can run 'make menuconfig' to choose the GPIO to blink,
    or you can edit the following line and set a number here.
 */
@@ -56,6 +57,8 @@
 
 
 #define GATTS_TAG "GATTS_DEMO"
+
+static void ble_gatts_init(void);
 
 static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param); 
 ///Declare the static function
@@ -563,7 +566,6 @@ static void configure_subsystems(void)
         ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK( ret );
-    ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT));
 
     ESP_LOGI(GATTS_TAG, "flash finished\n");
 
@@ -574,7 +576,7 @@ static void configure_subsystems(void)
         return;
     }
 
-    ret = esp_bt_controller_enable(ESP_BT_MODE_BLE);
+    ret = esp_bt_controller_enable(ESP_BT_MODE_BTDM);
     if (ret) {
         ESP_LOGE(GATTS_TAG, "%s enable controller failed: %s\n", __func__, esp_err_to_name(ret));
         return;
@@ -590,6 +592,11 @@ static void configure_subsystems(void)
         return;
     }
 
+}
+
+static void ble_gatts_init(void)
+{
+    esp_err_t ret;
     ret = esp_ble_gatts_register_callback(gatts_event_handler);
     if (ret){
         ESP_LOGE(GATTS_TAG, "gatts register error, error code = %x", ret);
@@ -619,6 +626,9 @@ static void configure_subsystems(void)
     if (local_mtu_ret){
         ESP_LOGE(GATTS_TAG, "set local  MTU failed, error code = %x", local_mtu_ret);
     }
+
+
+
 }
 
 
@@ -636,11 +646,26 @@ void app_main()
             break;
 
     }
+    //
+    //init core peripherals 
+    //
     configure_subsystems();
     //ripping this 
     gpio_pad_select_gpio(BLINK_GPIO);
     /* Set the GPIO as a push/pull output */
     gpio_set_direction(BLINK_GPIO, GPIO_MODE_OUTPUT);
+    
+    //
+    //start up ble
+    //
+    ble_gatts_init();
+
+    
+    //
+    //start up bt
+    //
+    bt_app_task_start_up();
+
     ESP_LOGI(GATTS_TAG, "starting eeprom task\n");
     eeprom_init(0);
     /*
