@@ -1,0 +1,3 @@
+[submodule "gatt_server/main/babel_gen"]
+	path = gatt_server/main/babel_gen
+	url = https://github.com/Jconn/babel_gen

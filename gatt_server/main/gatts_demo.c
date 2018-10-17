@@ -35,6 +35,7 @@
 #include "esp_bt_main.h"
 #include "esp_bt_main.h"
 #include "esp_gatt_common_api.h"
+#include "esp_pm.h"
 
 #include "sdkconfig.h"
 
@@ -44,6 +45,7 @@
 #include "sensor_drive_constructor.h"
 #include "serial_driver.h"
 #include "bt_app_core.h"
+
 /* Can run 'make menuconfig' to choose the GPIO to blink,
    or you can edit the following line and set a number here.
 */
@@ -78,7 +80,9 @@ static void gatts_profile_c_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
 #define GATTS_DEMO_CHAR_VAL_LEN_MAX 0x40
 
 #define PREPARE_BUF_MAX_SIZE 1024
-
+static bool s_indicate_enabled = false;
+static esp_power_level_t s_activePowerLevel;
+const static esp_power_level_t sc_sleepPowerLevel = ESP_PWR_LVL_N14;
 uint8_t char1_str[] = {0x11,0x22,0x33};
 esp_gatt_char_prop_t a_property = 0;
 
@@ -159,6 +163,7 @@ static esp_ble_adv_params_t adv_params = {
     .channel_map        = ADV_CHNL_ALL,
     .adv_filter_policy = ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY,
 };
+
 
 
 /* One gatt-based profile one app_id and one gatts_if, this array will store the gatts_if returned by ESP_GATTS_REG_EVT */
@@ -351,11 +356,12 @@ void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gat
         int sample_len = 0;
         sample_len = get_sensor(raw_data);
         rsp.attr_value.len = sample_len;
-        printf("got sample of length %d\n", sample_len);
         for(int i = 0; i < sample_len; ++i)
         {
             rsp.attr_value.value[i] = raw_data[i];
         }
+        ESP_LOGI(GATTS_TAG, "sending sample of length %d, data:\n", rsp.attr_value.len);
+        esp_log_buffer_hex(GATTS_TAG, rsp.attr_value.value, rsp.attr_value.len);
         esp_ble_gatts_send_response(gatts_if, param->read.conn_id, param->read.trans_id,
                                     ESP_GATT_OK, &rsp);
         break;
@@ -379,8 +385,8 @@ void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gat
                             notify_data[i] = i%0xff;
                         }
                         //the size of notify_data[] need less than MTU size
-                        esp_ble_gatts_send_indicate(gatts_if, param->write.conn_id, gl_profile_tab[PROFILE_A_APP_ID].char_handle,
-                                                sizeof(notify_data), notify_data, false);
+                        esp_ble_gap_stop_advertising();
+                        s_indicate_enabled = true;
                     }
                 }else if (descr_value == 0x0002){
                     if (a_property & ESP_GATT_CHAR_PROP_BIT_INDICATE){
@@ -391,8 +397,8 @@ void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gat
                             indicate_data[i] = i%0xff;
                         }
                         //the size of indicate_data[] need less than MTU size
-                        esp_ble_gatts_send_indicate(gatts_if, param->write.conn_id, gl_profile_tab[PROFILE_A_APP_ID].char_handle,
-                                                sizeof(indicate_data), indicate_data, true);
+//                        esp_ble_gatts_send_indicate(gatts_if, param->write.conn_id, gl_profile_tab[PROFILE_A_APP_ID].char_handle,
+//                                                sizeof(indicate_data), indicate_data, true);
                     }
                 }
                 else if (descr_value == 0x0000){
@@ -492,7 +498,9 @@ void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gat
         break;
     }
     case ESP_GATTS_DISCONNECT_EVT:
+        s_indicate_enabled = false;
         ESP_LOGI(GATTS_TAG, "ESP_GATTS_DISCONNECT_EVT");
+        gl_profile_tab[PROFILE_A_APP_ID].gatts_if = ESP_GATT_IF_NONE; 
         esp_ble_gap_start_advertising(&adv_params);
         break;
     case ESP_GATTS_CONF_EVT:
@@ -570,13 +578,15 @@ static void configure_subsystems(void)
     ESP_LOGI(GATTS_TAG, "flash finished\n");
 
     esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
+
+    ESP_LOGI(GATTS_TAG, "default mode is: %d", bt_cfg.mode);
     ret = esp_bt_controller_init(&bt_cfg);
     if (ret) {
         ESP_LOGE(GATTS_TAG, "%s initialize controller failed: %s\n", __func__, esp_err_to_name(ret));
         return;
     }
 
-    ret = esp_bt_controller_enable(ESP_BT_MODE_BTDM);
+    ret = esp_bt_controller_enable(ESP_BT_MODE_BLE);
     if (ret) {
         ESP_LOGE(GATTS_TAG, "%s enable controller failed: %s\n", __func__, esp_err_to_name(ret));
         return;
@@ -632,6 +642,46 @@ static void ble_gatts_init(void)
 }
 
 
+void update_data(uint8_t *data, uint8_t len)
+{
+
+    static bool s_disabled_bt = false;
+    uint8_t conn_id = 0;
+
+    if(s_disabled_bt)
+    {
+        ESP_LOGI(GATTS_TAG, "disabling sleep");
+        //esp_bt_sleep_disable();
+        s_disabled_bt = false;
+    }
+
+    if(!s_indicate_enabled)
+    {
+        return false;
+    }
+
+
+    if( ESP_GATT_IF_NONE != gl_profile_tab[PROFILE_A_APP_ID].gatts_if )
+    {
+
+        esp_err_t ret;
+        ret = esp_bt_controller_enable(ESP_BT_MODE_BTDM);
+        esp_ble_gatts_send_indicate(gl_profile_tab[PROFILE_A_APP_ID].gatts_if,
+                conn_id, gl_profile_tab[PROFILE_A_APP_ID].char_handle,
+                len, data, false);
+
+        if(!s_disabled_bt)
+        {
+            ESP_LOGI(GATTS_TAG, "enabling sleep");
+
+            //
+            //esp_bt_sleep_enable();
+            //
+            s_disabled_bt = true;
+        }
+    }
+}
+
 void app_main()
 {
 
@@ -654,22 +704,27 @@ void app_main()
     gpio_pad_select_gpio(BLINK_GPIO);
     /* Set the GPIO as a push/pull output */
     gpio_set_direction(BLINK_GPIO, GPIO_MODE_OUTPUT);
-    
+    esp_pm_config_esp32_t pm_config;
+    pm_config.max_freq_mhz = CONFIG_ESP32_DEFAULT_CPU_FREQ_MHZ;
+    pm_config.min_freq_mhz = CONFIG_ESP32_DEFAULT_CPU_FREQ_MHZ;
+    pm_config.light_sleep_enable = true;
     //
     //start up ble
     //
+    esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_DEFAULT,0);
     ble_gatts_init();
 
     
     //
     //start up bt
     //
-    bt_app_task_start_up();
-
+    //bt_app_task_start_up();
     ESP_LOGI(GATTS_TAG, "starting eeprom task\n");
+    ESP_ERROR_CHECK(esp_pm_configure(&pm_config)); 
     eeprom_init(0);
+    
     /*
-    vTaskDelay(20000 / portTICK_PERIOD_MS);
+    vTaskDelay(10000 / portTICK_PERIOD_MS);
 
     esp_bluedroid_disable();
     esp_bluedroid_deinit();
@@ -684,5 +739,6 @@ void app_main()
 
     esp_deep_sleep_start();
     */
+    
     return;
 }

@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "driver/i2c.h"
+#include "babel.pb.h"
 
 typedef enum i2c_actions {
     START = 1, 
@@ -29,8 +30,8 @@ typedef struct i2c_capture {
 void activate_profile(void);
 int get_sensor(uint8_t* data_buf);
 void i2c_sensor_init(void);
-void process_byte(tI2cActions *current_command, 
-                    tI2cActions *prev_command,
+void process_byte(uint32_t *current_command, 
+                    uint32_t *prev_command,
                     tIicManager *manager
                     );
 #endif

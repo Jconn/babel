@@ -112,7 +112,8 @@ static esp_err_t i2c_example_master_write_slave(i2c_port_t i2c_num, uint8_t* dat
 
 /**
  * @brief i2c master initialization
- */
+ *
+ *
 static void i2c_example_master_init()
 {
     int i2c_master_port = I2C_EXAMPLE_MASTER_NUM;
@@ -128,19 +129,4 @@ static void i2c_example_master_init()
                        I2C_EXAMPLE_MASTER_RX_BUF_DISABLE,
                        I2C_EXAMPLE_MASTER_TX_BUF_DISABLE, 0);
 }
-
-/**
- * @brief test function to show buffer
- */
-static void disp_buf(uint8_t* buf, int len)
-{
-    int i;
-    for (i = 0; i < len; i++) {
-        printf("%02x ", buf[i]);
-        if (( i + 1 ) % 16 == 0) {
-            printf("\n");
-        }
-    }
-    printf("\n");
-}
-
+*/

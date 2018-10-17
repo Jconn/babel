@@ -19,6 +19,12 @@
 #include "esp_bt_main.h"
 #include "esp_bt_main.h"
 #include "esp_gatt_common_api.h"
+
+#include "babel.pb.h"
+#include "pb_encode.h"
+#include "pb_decode.h"
+#include "pb_common.h"
+
 #include "gatts_demo.h"
 
 
@@ -71,6 +77,7 @@ static int32_t eeprom_profile = -1;
 static int32_t s_eeprom_read_page = 0;
 esp_gatt_char_prop_t b_property = 0;
 
+static tBabelMsgHandler s_ble_manager;
 int32_t get_cached_profile(void)
 {
     return eeprom_profile;
@@ -101,6 +108,90 @@ static void activate_profile(int32_t profile)
     }
 }
 */
+
+bool process_prom_msg(tBabelMsgHandler *manager)
+{
+
+    PromMessage msg = PromMessage_init_zero;
+
+    /* Create a stream that reads from the buffer. */
+    pb_istream_t stream = pb_istream_from_buffer(manager->msg_bytes,
+            manager->current_msg_length);
+
+    /* Now we are ready to decode the message. */
+    bool status = pb_decode(&stream, PromMessage_fields, &msg);
+    if(!status)
+    {
+        ESP_LOGI(EEPROM_TAG, "failed to parse message of len: %d",manager->current_msg_length);
+        return false;
+    }
+    int page = msg.page;
+    switch(msg.type)
+    {
+        case PromMessage_promType_WRITE: 
+            {
+                int len = msg.payload.size;
+                if(len > 16)
+                {
+                    ESP_LOGI(EEPROM_TAG, "len too big: %d",len);
+                    return false;
+                }
+                ESP_LOGI(EEPROM_TAG, "eeprom page %d write len %d",page, len);
+                //write the eeprom page 
+                eeprom_write(page, len, msg.payload.bytes); 
+            }
+            break;
+        case PromMessage_promType_READ: 
+            {
+                int len = 16;
+                //set up for a read - if this characteristic is read
+                //then trigger an eeprom read to the page
+                ESP_LOGI(EEPROM_TAG, "eeprom page %d read len %d",page, len);
+                s_eeprom_read_page = page;
+            }
+            break;
+        default:
+            ESP_LOGI(EEPROM_TAG, "unknown command: %d",msg.type);
+            break;
+    }
+    return true;
+}
+
+bool manage_new_bytes( tBabelMsgHandler *manager,
+                        uint8_t *new_data,
+                        uint32_t new_data_len,
+                        bool(*msg_handler)(tBabelMsgHandler*) )
+{
+char* byte_manager = "new_bytes";
+    if(!manager->processing_msg)
+    {
+        ESP_LOGI(byte_manager, 
+            "beginning message processing of length %d",new_data[0]);
+        manager->processing_msg = true;
+        manager->total_msg_length = new_data[0];
+        memcpy(manager->msg_bytes,
+                &(new_data[1]),
+                new_data_len-1);
+        manager->current_msg_length = new_data_len-1; 
+    }
+    else
+    {
+        ESP_LOGI(byte_manager, "appending to msg, on byte %d", manager->current_msg_length);
+        memcpy(&(manager->msg_bytes[manager->current_msg_length]),
+                &(new_data[0]), new_data_len);
+        manager->current_msg_length  += new_data_len;
+    }
+
+    if(manager->current_msg_length >= manager->total_msg_length)
+    {
+        ESP_LOGI(byte_manager, "msg processing complete");
+        manager->processing_msg = false;
+        return msg_handler(manager);
+    }
+
+    return false;
+}
+
 esp_err_t eeprom_read(uint8_t page_addr, int length, uint8_t* outBuffer)
 {
     i2c_cmd_handle_t cmd = i2c_cmd_link_create();
@@ -202,7 +293,7 @@ void eeprom_init(void* arg)
 {
     xTaskCreate(eeprom_poll, 
                  "i2c_test_task_0",
-                 1024 * 2,
+                 1024 * 10,
                  (void* ) 0, 
                  10,
                  NULL);
@@ -251,10 +342,16 @@ static void eeprom_poll(void* arg)
         {
             activate_profile(); 
         }
-        eeprom_profile = current_profile;
 
+        eeprom_profile = current_profile;
         ESP_LOGI("eeprom", "sensor family: %d\n", eeprom_profile); 
-        vTaskDelay(1000/ portTICK_RATE_MS);
+
+        uint8_t raw_data[32];
+        int sample_len = 0;
+
+        sample_len = get_sensor(raw_data);
+        update_data(raw_data, sample_len);
+        vTaskDelay(5000/ portTICK_RATE_MS);
     }
 }
 
@@ -289,6 +386,8 @@ void eeprom_bt_profile(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_b
     }
     case ESP_GATTS_WRITE_EVT: {
         ESP_LOGI(EEPROM_TAG, "GATT_WRITE_EVT, conn_id %d, trans_id %d, handle %d\n", param->write.conn_id, param->write.trans_id, param->write.handle);
+        
+
         if (!param->write.is_prep){
             ESP_LOGI(EEPROM_TAG, "GATT_WRITE_EVT, value len %d, value :", param->write.len);
             esp_log_buffer_hex(EEPROM_TAG, param->write.value, param->write.len);
@@ -328,48 +427,17 @@ void eeprom_bt_profile(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_b
                 }
 
             }
-            else
-            {
-                if(param->write.len !=0)
-                {
-
-                    int command = param->write.value[0];   
-                    int page = param->write.value[1];
-                    switch(command)
-                    {
-                        //write 
-                        case 1:
-                        {
-                            int len = param->write.value[2];
-                            if(len > 16)
-                            {
-                                ESP_LOGI(EEPROM_TAG, "len too big: %d",len);
-                                break;
-                            }
-                            if(param->write.len - 3 != len)
-                            {
-                                ESP_LOGI(EEPROM_TAG, "len mismatch, %d expected %d", param->write.len, len+2);
-                                break;
-                            }
-                            ESP_LOGI(EEPROM_TAG, "eeprom page %d write len %d",page, len);
-                            //write the eeprom page 
-                            eeprom_write(page, len, &(param->write.value[3])); 
-                        }
-                            break;
-                        //read
-                        case 2:
-                            //set up for a read - if this characteristic is read
-                            //then trigger an eeprom read to the page
-                            s_eeprom_read_page = page;
-                            break;
-                        default:
-                            ESP_LOGI(EEPROM_TAG, "unknown command: %d",command);
-                            break;
-                    }
-                }
-            }
             
         }
+        if(param->write.len !=0)
+        {
+
+            manage_new_bytes(&s_ble_manager,
+                    param->write.value,
+                    param->write.len,
+                    process_prom_msg);
+        }
+
         example_write_event_env(gatts_if, &b_prepare_write_env, param);
         break;
                               }

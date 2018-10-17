@@ -14,7 +14,6 @@ When VDD_A is 3.3V:
 */
 #define ADC_MAX_MV (3300)
 
-static int getSoilMoisture(char* Buffer);
 
 void activate_df_robot_soil(tSampleCapture *active_sensor)
 {
@@ -23,7 +22,8 @@ void activate_df_robot_soil(tSampleCapture *active_sensor)
     init_sensor();
 }
 
-static int getSoilMoisture(char* Buffer)
+/*
+int getSoilMoisture(char* Buffer)
 { 
     uint32_t voltage = getADCmV();
     int len = 0;
@@ -43,4 +43,4 @@ static int getSoilMoisture(char* Buffer)
     return len;
 }
 
-
+*/

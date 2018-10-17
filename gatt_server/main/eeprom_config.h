@@ -27,6 +27,12 @@ typedef enum {
     SENS_BMP_280 = 0x4
 } tSensorProfiles;
 
+typedef struct _msgManager {
+    bool processing_msg;
+    uint32_t total_msg_length;
+    uint32_t current_msg_length;
+    uint8_t msg_bytes[256];
+} tBabelMsgHandler;
 
 void eeprom_init(void* arg);
 esp_err_t eeprom_read(uint8_t page_addr, int length, uint8_t* outBuffer);
@@ -37,6 +43,12 @@ int set_profile(uint32_t profile_val);
 int getADCConversion(char* Buffer);
 
 void eeprom_bt_profile(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param, struct gatts_profile_inst *profile);
+
+
+bool manage_new_bytes( tBabelMsgHandler *manager,
+                        uint8_t *new_data,
+                        uint32_t new_data_len,
+                        bool(*msg_handler)(tBabelMsgHandler*) );
 
 
 #endif //EEPROM_CONFIG_H_

@@ -48,7 +48,7 @@ static const esp_spp_role_t role_slave = ESP_SPP_ROLE_SLAVE;
 esp_ota_handle_t update_handle = 0 ;
 const esp_partition_t *update_partition = NULL;
 
-static void print_speed(void)
+void print_speed(void)
 {
     float time_old_s = time_old.tv_sec + time_old.tv_usec / 1000000.0;
     float time_new_s = time_new.tv_sec + time_new.tv_usec / 1000000.0;
@@ -59,7 +59,6 @@ static void print_speed(void)
     time_old.tv_sec = time_new.tv_sec;
     time_old.tv_usec = time_new.tv_usec;
 }
-
 static void esp_spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)
 {
     switch (event) {
