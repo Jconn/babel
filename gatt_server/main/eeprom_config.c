@@ -328,7 +328,9 @@ static void i2c_example_master_init(void)
     i2c_param_config(i2c_master_port, &conf);
     i2c_driver_install(i2c_master_port, conf.mode,
                        I2C_EXAMPLE_MASTER_RX_BUF_DISABLE,
-                       I2C_EXAMPLE_MASTER_TX_BUF_DISABLE, 0);
+                       I2C_EXAMPLE_MASTER_TX_BUF_DISABLE, 
+                       false, //micropy arg - looks like slave feature
+                       0);
 }
 
 static void eeprom_poll(void* arg)

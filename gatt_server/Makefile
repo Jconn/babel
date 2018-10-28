@@ -4,7 +4,6 @@
 #
 
 PROJECT_NAME := gatt_server_demos
-
+#COMPONENT_DIRS := . micropython 
 COMPONENT_ADD_INCLUDEDIRS := components/include
-
 include $(IDF_PATH)/make/project.mk
