@@ -46,6 +46,7 @@
 
 
 
+static uint8_t script[1000]; 
 static char* tag = "sensor";
 static void construct_analog_reader(void);
 static void construct_i2c_reader(void);
@@ -87,6 +88,38 @@ static void adc_pin_configure(void)
 
     gpio_set_level(I2C_SCL_ENABLE_IO, 1);
     gpio_set_level(I2C_SDA_ENABLE_IO, 1);
+}
+
+void collect_string(int script_len)
+{
+    
+    uint8_t data[16];
+    eeprom_read(0, EEPROM_PAGE_LENGTH, data);
+    int offset = 0;
+    if(script_len < 12)
+    {
+        memcpy(script, &data[4], script_len);
+        
+        return;
+    }
+    else
+    {
+        memcpy(script, &data[4], 12);
+    }
+    offset += 12;
+    int page = 1;
+    //cycle through and read the rest of the pages
+    for(; offset < script_len;  offset+=16)
+    {
+        eeprom_read(page, 16, &(script[offset]));
+        page++;
+    }
+
+    ESP_LOGI(tag, "found script of length %d, data:\n", script_len); 
+    esp_log_buffer_char(tag, script, script_len);
+
+    //null-terminator
+    script[script_len] = 0;
 }
 
 void activate_profile(void)

@@ -78,6 +78,8 @@ static int32_t s_eeprom_read_page = 0;
 esp_gatt_char_prop_t b_property = 0;
 
 static tBabelMsgHandler s_ble_manager;
+
+
 int32_t get_cached_profile(void)
 {
     return eeprom_profile;
@@ -342,7 +344,8 @@ static void eeprom_poll(void* arg)
         int32_t current_profile = get_eeprom_profile();
         if(current_profile != eeprom_profile)
         {
-            activate_profile(); 
+            collect_string(current_profile);
+            //activate_profile(); 
         }
 
         eeprom_profile = current_profile;
