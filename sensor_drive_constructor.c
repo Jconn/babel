@@ -63,7 +63,7 @@ static tIicManager s_manager;
 
 static uint32_t s_serial_data[256];
 static int s_serial_length = 0;
-
+static bool script_read = false;
 
 static void adc_pin_configure(void);
 static void i2c_pin_configure(void);
@@ -88,6 +88,12 @@ static void adc_pin_configure(void)
 
     gpio_set_level(I2C_SCL_ENABLE_IO, 1);
     gpio_set_level(I2C_SDA_ENABLE_IO, 1);
+}
+
+char* get_script(void)
+{
+    if(script_read) return (char*)script;
+    else return NULL;
 }
 
 void collect_string(int script_len)
@@ -120,6 +126,7 @@ void collect_string(int script_len)
 
     //null-terminator
     script[script_len] = 0;
+    script_read = true;
 }
 
 void activate_profile(void)

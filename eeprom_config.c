@@ -293,9 +293,10 @@ int32_t get_eeprom_profile(void)
 
 void eeprom_init(void* arg)
 {
+    ESP_LOGI("eeprom", "starting eeprom task"); 
     xTaskCreate(eeprom_poll, 
                  "i2c_test_task_0",
-                 1024 * 10,
+                 1024 * 5,
                  (void* ) 0, 
                  10,
                  NULL);
@@ -355,7 +356,7 @@ static void eeprom_poll(void* arg)
         int sample_len = 0;
 
         sample_len = get_sensor(raw_data);
-        update_data(raw_data, sample_len);
+        //update_data(raw_data, sample_len);
         vTaskDelay(5000/ portTICK_RATE_MS);
     }
 }

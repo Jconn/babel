@@ -2,12 +2,13 @@
 #include <stdio.h>
 #include "driver/adc.h"
 #include <string.h>
-
+#include "sdkconfig.h"
 #include "driver/i2c.h"
 #include "sample_capture.h"
 #include "eeprom_config.h"
 #include "sensor_drive_constructor.h"
 #include "bmp280.h"
+#include "esp_log.h"
 /*
  - master:
  *    GPIO14 is assigned as the data signal of i2c master port

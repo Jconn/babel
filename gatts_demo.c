@@ -15,7 +15,6 @@
 *
 ****************************************************************************/
 
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -682,7 +681,14 @@ void update_data(uint8_t *data, uint8_t len)
     }
 }
 
+/*
 void app_main()
+{
+    gatt_init();
+}
+*/
+
+void babel_app_init()
 {
 
     switch (esp_sleep_get_wakeup_cause()) {

@@ -5,5 +5,5 @@
 #
 
 COMPONENT_SRCDIRS := . babel_gen
-COMPONENT_ADD_INCLUDEDIRS := components/include babel_gen 
+COMPONENT_ADD_INCLUDEDIRS := . babel_gen
 

@@ -51,5 +51,8 @@ void example_exec_write_event_env(prepare_type_env_t *prepare_write_env, esp_ble
 void example_write_event_env(esp_gatt_if_t gatts_if, prepare_type_env_t *prepare_write_env, esp_ble_gatts_cb_param_t *param);
 
 void update_data(uint8_t *data, uint8_t len);
+
+//offloading this define for eeprom_config
+void eeprom_bt_profile(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param, struct gatts_profile_inst *profile);
 #endif //GATTS_DEMO_H_
 
