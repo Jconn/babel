@@ -26,6 +26,7 @@
 #include "pb_common.h"
 
 #include "gatts_demo.h"
+#include "ads1118.h"
 
 
 #include "u8g2.h"
@@ -59,6 +60,8 @@
 #define I2C_EXAMPLE_MASTER_FREQ_HZ         100000           /*!< I2C master clock frequency */
 
 
+#define PIN_SDA I2C_EXAMPLE_MASTER_SDA_IO
+#define PIN_SCL I2C_EXAMPLE_MASTER_SCL_IO
 
 //
 //from the datasheet  - pages are 16 bytes long
@@ -338,38 +341,22 @@ static void i2c_example_master_init(void)
                        0);
 }
 
-// CLK - GPIO14
-#define PIN_CLK 14
-
-// MOSI - GPIO 13
-#define PIN_MOSI 13
-
-// RESET - GPIO 26
-#define PIN_RESET 26
-
-// DC - GPIO 27
-#define PIN_DC 27
-
-// CS - GPIO 15
-#define PIN_CS 15
-
 void set_display(u8g2_t *u8g2)
 {
     //setup the hal state for the display callback(this is kolban specific)
     u8g2_esp32_hal_t u8g2_esp32_hal = U8G2_ESP32_HAL_DEFAULT;
-    u8g2_esp32_hal.clk   = PIN_CLK;
-    u8g2_esp32_hal.mosi  = PIN_MOSI;
-    u8g2_esp32_hal.cs    = PIN_CS;
-    u8g2_esp32_hal.dc    = PIN_DC;
-    u8g2_esp32_hal.reset = PIN_RESET;
+    u8g2_esp32_hal.sda   = PIN_SDA;
+    u8g2_esp32_hal.scl  = PIN_SCL;
     u8g2_esp32_hal_init(u8g2_esp32_hal);
 
     u8g2_Setup_ssd1306_128x64_noname_f(
             u8g2,
             U8G2_R0,
-            u8g2_esp32_spi_byte_cb,
+            u8g2_esp32_i2c_byte_cb,
             u8g2_esp32_gpio_and_delay_cb);  // init u8g2 structure
 
+//either    “0111100” or “0111101”, 
+    u8x8_SetI2CAddress(&(u8g2->u8x8),0x3B);
     u8g2_InitDisplay(u8g2); // send init sequence to the display, display is in sleep mode after this,
     u8g2_SetPowerSave(u8g2, 0); // wake up display
 
@@ -378,7 +365,8 @@ static void eeprom_poll(void* arg)
 {
 
     u8g2_t u8g2; // a structure which will contain all the data for one display
-    i2c_example_master_init();
+    init_adsdevice();
+    //i2c_example_master_init();
     activate_adc();
     /* setup display */
 
@@ -388,9 +376,11 @@ static void eeprom_poll(void* arg)
     u8g2_SetFont(&u8g2, u8g2_font_ncenB14_tr);
     u8g2_DrawStr(&u8g2, 0,15,"Hello World!");
     u8g2_SendBuffer(&u8g2);
-
+    ext_adc measurement;
+    default_one_shot_config(&measurement);
     while (1) {
-
+        float result = get_measurement(&measurement);
+        ESP_LOGI("eeprom", "measured voltage: %f\n", result); 
         int32_t current_profile = get_eeprom_profile();
         if(current_profile != eeprom_profile)
         {
@@ -402,9 +392,8 @@ static void eeprom_poll(void* arg)
         ESP_LOGI("eeprom", "sensor family: %d\n", eeprom_profile); 
 
         uint8_t raw_data[32];
-        int sample_len = 0;
 
-        sample_len = get_sensor(raw_data);
+        get_sensor(raw_data);
         //update_data(raw_data, sample_len);
         vTaskDelay(5000/ portTICK_RATE_MS);
     }

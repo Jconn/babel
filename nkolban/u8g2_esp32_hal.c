@@ -17,7 +17,7 @@ static i2c_cmd_handle_t    handle_i2c;      // I2C handle.
 static u8g2_esp32_hal_t    u8g2_esp32_hal;  // HAL state data.
 
 #undef ESP_ERROR_CHECK
-#define ESP_ERROR_CHECK(x)   do { esp_err_t rc = (x); if (rc != ESP_OK) { ESP_LOGE("err", "esp_err_t = %d", rc); assert(0 && #x);} } while(0);
+#define ESP_ERROR_CHECK(x)   do { esp_err_t rc = (x); if (rc != ESP_OK) { ESP_LOGE("err", "esp_err_t = %d", rc);} } while(0);
 
 /*
  * Initialze the ESP32 HAL.
