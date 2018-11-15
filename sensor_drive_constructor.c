@@ -98,7 +98,8 @@ char* get_script(void)
 
 void collect_string(int script_len)
 {
-    
+    if(script_len < 0) return;
+
     uint8_t data[16];
     eeprom_read(0, EEPROM_PAGE_LENGTH, data);
     int offset = 0;

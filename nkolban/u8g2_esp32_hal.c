@@ -15,13 +15,18 @@ static const unsigned int I2C_TIMEOUT_MS = 1000;
 static spi_device_handle_t handle_spi;      // SPI handle.
 static i2c_cmd_handle_t    handle_i2c;      // I2C handle.
 static u8g2_esp32_hal_t    u8g2_esp32_hal;  // HAL state data.
-
+static bool driver_err = false;
 #undef ESP_ERROR_CHECK
-#define ESP_ERROR_CHECK(x)   do { esp_err_t rc = (x); if (rc != ESP_OK) { ESP_LOGE("err", "esp_err_t = %d", rc);} } while(0);
+#define ESP_ERROR_CHECK(x)   do { esp_err_t rc = (x); if (rc != ESP_OK) { ESP_LOGE("err", "esp_err_t = %d", rc); driver_err = true;} } while(0);
 
 /*
  * Initialze the ESP32 HAL.
  */
+bool i2c_error(void)
+{
+    return driver_err;
+}
+
 void u8g2_esp32_hal_init(u8g2_esp32_hal_t u8g2_esp32_hal_param) {
 	u8g2_esp32_hal = u8g2_esp32_hal_param;
 } // u8g2_esp32_hal_init

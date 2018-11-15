@@ -27,10 +27,8 @@
 
 #include "gatts_demo.h"
 #include "ads1118.h"
-
-
-#include "u8g2.h"
-#include "u8g2_esp32_hal.h"
+#include "uart_programmer.h"
+#include "display_manager.h"
 #define EEPROM_I2C_ADDR (0x50)
 
 //
@@ -71,14 +69,13 @@
 //
 
 char* EEPROM_TAG = "eeprom";
-
 static prepare_type_env_t b_prepare_write_env;
 
 static void i2c_example_master_init(void);
 static void eeprom_poll(void* arg);
 static void deserialize_u32(uint8_t*in , uint32_t *out);
 static void serialize_u32(uint8_t*out , uint32_t in);
-static int32_t eeprom_profile = -1;
+static int32_t eeprom_profile = 0xAABBDDEE;
 static int32_t s_eeprom_read_page = 0;
 esp_gatt_char_prop_t b_property = 0;
 
@@ -169,7 +166,7 @@ bool manage_new_bytes( tBabelMsgHandler *manager,
                         uint32_t new_data_len,
                         bool(*msg_handler)(tBabelMsgHandler*) )
 {
-char* byte_manager = "new_bytes";
+    char* byte_manager = "new_bytes";
     if(!manager->processing_msg)
     {
         ESP_LOGI(byte_manager, 
@@ -235,6 +232,35 @@ esp_err_t eeprom_read(uint8_t page_addr, int length, uint8_t* outBuffer)
             1000 / portTICK_RATE_MS);
     i2c_cmd_link_delete(cmd);
     return ret;
+}
+
+bool store_script(uint8_t* program)
+{
+    ESP_LOGI(EEPROM_TAG, "writing program of length %d: ", strlen((char*)program) ); 
+    int script_len = strlen((char*)program);
+    int offset = 0;
+    uint8_t first_page[16];
+    memset(first_page, 0, sizeof(first_page));
+    serialize_u32(first_page, script_len);
+
+    memcpy(&(first_page[4]), program, 12);
+
+    eeprom_write(0, EEPROM_PAGE_LENGTH, first_page);
+
+    if(script_len < 12)
+    {
+        return true;
+    }
+    offset += 12;
+
+    int page = 1;
+    //cycle through and read the rest of the pages
+    for(; offset < script_len;  offset+=16)
+    {
+        eeprom_write(page, 16, &(program[offset]));
+        page++;
+    }
+    return true;
 }
 
 esp_err_t eeprom_write(uint8_t page_addr, int length, uint8_t* inBuffer)
@@ -341,60 +367,28 @@ static void i2c_example_master_init(void)
                        0);
 }
 
-void set_display(u8g2_t *u8g2)
-{
-    //setup the hal state for the display callback(this is kolban specific)
-    u8g2_esp32_hal_t u8g2_esp32_hal = U8G2_ESP32_HAL_DEFAULT;
-    u8g2_esp32_hal.sda   = PIN_SDA;
-    u8g2_esp32_hal.scl  = PIN_SCL;
-    u8g2_esp32_hal_init(u8g2_esp32_hal);
 
-    u8g2_Setup_ssd1306_128x64_noname_f(
-            u8g2,
-            U8G2_R0,
-            u8g2_esp32_i2c_byte_cb,
-            u8g2_esp32_gpio_and_delay_cb);  // init u8g2 structure
 
-//either    “0111100” or “0111101”, 
-    u8x8_SetI2CAddress(&(u8g2->u8x8),0x3B);
-    u8g2_InitDisplay(u8g2); // send init sequence to the display, display is in sleep mode after this,
-    u8g2_SetPowerSave(u8g2, 0); // wake up display
-
-}
 static void eeprom_poll(void* arg)
 {
 
-    u8g2_t u8g2; // a structure which will contain all the data for one display
     init_adsdevice();
     //i2c_example_master_init();
     activate_adc();
     /* setup display */
 
-    set_display(&u8g2);
-    u8g2_ClearBuffer(&u8g2);
-    u8g2_DrawBox(&u8g2, 10,20, 20, 30);
-    u8g2_SetFont(&u8g2, u8g2_font_ncenB14_tr);
-    u8g2_DrawStr(&u8g2, 0,15,"Hello World!");
-    u8g2_SendBuffer(&u8g2);
+    set_display();
     ext_adc measurement;
     default_one_shot_config(&measurement);
     while (1) {
-        float result = get_measurement(&measurement);
-        ESP_LOGI("eeprom", "measured voltage: %f\n", result); 
         int32_t current_profile = get_eeprom_profile();
         if(current_profile != eeprom_profile)
         {
             collect_string(current_profile);
             //activate_profile(); 
         }
-
         eeprom_profile = current_profile;
-        ESP_LOGI("eeprom", "sensor family: %d\n", eeprom_profile); 
 
-        uint8_t raw_data[32];
-
-        get_sensor(raw_data);
-        //update_data(raw_data, sample_len);
         vTaskDelay(5000/ portTICK_RATE_MS);
     }
 }

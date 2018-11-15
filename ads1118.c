@@ -128,7 +128,7 @@ float get_measurement(ext_adc* adc)
 
     int16_t raw_result = (response[0] << 8 | response[1]);
     float result = (float) raw_result/0x7FFF;
-    result *= get_dynamic_range(adc); 
+    result *= get_dynamic_range(adc) * 1000; 
     return result;
 }
 

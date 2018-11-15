@@ -42,5 +42,6 @@ bool manage_new_bytes( tBabelMsgHandler *manager,
 
 char* get_script(void);
 
+bool store_script(uint8_t* program);
 #endif //EEPROM_CONFIG_H_
 
