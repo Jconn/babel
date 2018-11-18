@@ -18,6 +18,11 @@
 #include "eeprom_config.h"
 static const char *TAG = "uart_events";
 
+#include "babel.pb.h"
+#include "pb_encode.h"
+#include "pb_decode.h"
+#include "pb_common.h"
+
 /**
  * This example shows how to use the UART driver to handle special UART events.
  *
@@ -45,7 +50,7 @@ typedef enum program_storage {
     active = 1,
 } pstate;
 static pstate cur_state;
-static uint8_t program_buffer[512];
+static uint8_t *program_buffer = NULL;
 static bool program_ready = false;
 static int current_index = 0;
 static void uart_event_task(void *pvParameters)
@@ -67,58 +72,77 @@ static void uart_event_task(void *pvParameters)
                     ESP_LOGI(TAG, "[UART DATA]: %d", event.size);
                     uart_read_bytes(EX_UART_NUM, dtmp, event.size, portMAX_DELAY);
                     dtmp[event.size] = 0;
+#define SFRAME 0x02
+#define EFRAME 0x3
+#define MSG_SIZE_BUF 512 
                     for(int i = 0; i < event.size; ++i)
                     {
-                        switch(cur_state)
+                        switch(dtmp[i]) 
                         {
-                            case non_active:
-                                if(dtmp[i] == pattern_chr)
+                            case SFRAME:
+                                ESP_LOGI(TAG, "start of frame");
+                                //begin collecting new message 
+                                if(program_buffer != NULL)
                                 {
-                                    ESP_LOGI(TAG, "nonactive[%c] event:", dtmp[i]);
-                                    s_consecutive_symbols++;
-                                    if(s_consecutive_symbols >=
-                                            num_symbols)
-                                    {
-                                        program_ready = false;
-                                        cur_state = active;
-                                        current_index = 0;
-                                        s_consecutive_symbols = 0;
-                                    }
+                                    free(program_buffer);
                                 }
-                                else
-                                {
-                                    s_consecutive_symbols = 0;
-                                }
+                                program_buffer = (uint8_t*) malloc(MSG_SIZE_BUF);
+                                current_index = 0;
                                 break;
-                            case active:
-                                    program_buffer[current_index] = dtmp[i];
-                                    current_index++;
-                                    if(dtmp[i] == pattern_chr)
-                                    {
-                                        ESP_LOGI(TAG, "active[%c] event:", dtmp[i]);
-                                        s_consecutive_symbols++;
-                                        if(s_consecutive_symbols >=
-                                                num_symbols)
-                                        {
-                                            ESP_LOGI(TAG, "commiting script");
-                                            program_ready = true;
-                                            //remove the trailing three +++
-                                            program_buffer[current_index-num_symbols] = 0;
-                                            store_script(program_buffer);
-                                            cur_state = non_active;
-                                            current_index = 0;
-                                            s_consecutive_symbols = 0;
-                                        }
-                                    }
-                                    else
-                                    {
-                                        s_consecutive_symbols = 0;
-                                    }
+                            case EFRAME:
+                                ESP_LOGI(TAG, "end of frame");
+                                //
+                                //parse received message
+                                //
+                                if(current_index%2) 
+                                {
+                                    ESP_LOGE(TAG, "babel message odd size(%d)", current_index);
+                                    free(program_buffer);
+                                    program_buffer = NULL;
+                                    continue;
+                                }
+
+                                for(int j = 0; j < current_index; j+=2)
+                                {
+                                    program_buffer[j/2] = 
+                                        strtol((char[]){program_buffer[j],
+                                                         program_buffer[j+1], 0},
+                                                            NULL, 16);
+                                }
+
+                                ESP_LOGI(TAG, "transformed msg:");
+                                esp_log_buffer_hex(TAG, program_buffer, current_index/2);
+
+                                pb_istream_t stream = pb_istream_from_buffer(
+                                        program_buffer,
+                                        current_index/2);
+
+                                /* Now we are ready to decode the message. */
+                                programTransfer msg = programTransfer_init_zero;
+
+                                bool status = pb_decode(&stream, programTransfer_fields, &msg);
+                                QueueHandle_t target_queue = get_programmer_queue();
+                                if(target_queue != NULL)
+                                {
+                                    xQueueSendToBack(
+                                            target_queue,
+                                            &msg,
+                                            5000/ portTICK_RATE_MS
+                                            );
+                                }
+
                                 break;
                             default:
+                                if(program_buffer == NULL)
+                                {
+                                    //error case
+                                    continue;
+                                }
+                                program_buffer[current_index] = dtmp[i]; 
+                                current_index++;
                                 break;
                         }
-
+                        
                     }
                     ESP_LOGI(TAG, "[DATA EVT]: %s", dtmp);
                       
@@ -207,11 +231,6 @@ void uart_programmer()
     //Install UART driver, and get the queue.
     uart_driver_install(EX_UART_NUM, BUF_SIZE * 2, BUF_SIZE * 2, 20, &uart0_queue, 0);
 
-    //Set uart pattern detect function.
-    //uart_enable_pattern_det_intr(EX_UART_NUM, '+', PATTERN_CHR_NUM, 10000, 10, 10);
-    //Reset the pattern queue length to record at most 20 pattern positions.
-    uart_pattern_queue_reset(EX_UART_NUM, 20);
-
     //Create a task to handler UART event from ISR
-    xTaskCreate(uart_event_task, "uart_event_task", 2048, NULL, 12, NULL);
+    xTaskCreate(uart_event_task, "uart_event_task", 3096, NULL, 12, NULL);
 }

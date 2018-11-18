@@ -99,24 +99,9 @@ char* get_script(void)
 void collect_string(int script_len)
 {
     if(script_len < 0) return;
-
-    uint8_t data[16];
-    eeprom_read(0, EEPROM_PAGE_LENGTH, data);
-    int offset = 0;
-    if(script_len < 12)
-    {
-        memcpy(script, &data[4], script_len);
-        
-        return;
-    }
-    else
-    {
-        memcpy(script, &data[4], 12);
-    }
-    offset += 12;
     int page = 1;
     //cycle through and read the rest of the pages
-    for(; offset < script_len;  offset+=16)
+    for(int offset = 0; offset < script_len;  offset+=16)
     {
         eeprom_read(page, 16, &(script[offset]));
         page++;

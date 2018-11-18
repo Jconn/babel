@@ -68,6 +68,7 @@ static int32_t eeprom_profile = 0xAABBDDEE;
 static int32_t s_eeprom_read_page = 0;
 esp_gatt_char_prop_t b_property = 0;
 
+static QueueHandle_t eeprom_program_queue;
 static tBabelMsgHandler s_ble_manager;
 
 
@@ -293,19 +294,19 @@ int set_profile(uint32_t profile_val)
             raw_buf);
 }
 
-int32_t get_eeprom_profile(void)
+uint32_t get_eeprom_profile(void)
 {
     uint8_t profile[10];
     if(eeprom_read(PROFILE_ADDR,
                 PROFILE_LEN,
                 profile) == ESP_FAIL)
     {
-        ESP_LOGI("eeprom", "i2c read failed"); 
+        ESP_LOGE("eeprom", "i2c read failed"); 
         
         return -1;
     }
     
-    ESP_LOGI("eeprom", "i2c read success"); 
+    ESP_LOGD("eeprom", "i2c read success"); 
     uint32_t out;
     deserialize_u32(profile,&out); 
     return out;
@@ -356,7 +357,10 @@ static void i2c_example_master_init(void)
                        0);
 }
 
-
+QueueHandle_t get_programmer_queue(void)
+{
+    return eeprom_program_queue; 
+}
 
 static void eeprom_poll(void* arg)
 {
@@ -369,16 +373,73 @@ static void eeprom_poll(void* arg)
     set_display();
     ext_adc measurement;
     default_one_shot_config(&measurement);
-    while (1) {
-        int32_t current_profile = get_eeprom_profile();
-        if(current_profile != eeprom_profile)
-        {
-            collect_string(current_profile);
-            //activate_profile(); 
-        }
-        eeprom_profile = current_profile;
 
-        vTaskDelay(5000/ portTICK_RATE_MS);
+
+    eeprom_program_queue = xQueueCreate(
+            3, //number of elements the queue can hold
+            sizeof(programTransfer) //the size of a queue element
+            );
+    int program_length = -1;  
+    int current_length = 0;
+    while (1) {
+         
+        programTransfer msg;
+        if(xQueueReceive(eeprom_program_queue,
+                    (void * )&msg,
+                    (portTickType)0)) {
+
+            switch(msg.action) {
+                case programTransfer_pTransferAction_BEGIN_MSG:
+                    ESP_LOGI(EEPROM_TAG, "received msg begin, len %d", msg.action_type.length);
+                    //store this for later - don't commit the first page until the end because otherwise the delta checker will freak out.
+                    //TODO - move away from this lazy method of preventing conflict
+                    program_length = msg.action_type.length;
+                    break;
+
+                case  programTransfer_pTransferAction_BLOCK_TRANSFER:
+                    ESP_LOGI(EEPROM_TAG, "received msg block %d", msg.action_type.payload.size);
+                    for(int i = 0; i < msg.action_type.payload.size; i+=16)
+                    {
+#define EPAGE_SIZE 16
+                        int page_length = msg.action_type.payload.size 
+                            - i > EPAGE_SIZE ?
+                            EPAGE_SIZE : msg.action_type.payload.size - i; 
+                        current_length += EPAGE_SIZE;
+                        eeprom_write(current_length/EPAGE_SIZE,
+                                page_length,
+                                &(msg.action_type.payload.bytes[i])); 
+                    }
+                    break;
+
+                case programTransfer_pTransferAction_END_MSG:
+                    ESP_LOGI(EEPROM_TAG, "received msg end, crc %d", msg.action_type.crc);
+                    set_profile(program_length);
+                    program_length = -1;
+                    current_length = 0;
+                    break;
+                default:
+                    ESP_LOGE(EEPROM_TAG, "unknnown pmessage type: %d",msg.action);
+                    break;
+            }
+        }
+        //TODO: explicit - not side effect way of synchronizing
+        if(program_length < 0)
+        {
+            int32_t current_profile = get_eeprom_profile();
+            if(current_profile != eeprom_profile)
+            {
+                collect_string(current_profile);
+                //activate_profile(); 
+            }
+            eeprom_profile = current_profile;
+
+        }
+        else
+        {
+            if(current_length == 0)
+                hal_print_screen("loading script...");
+        }
+        vTaskDelay(5/ portTICK_RATE_MS);
     }
 }
 

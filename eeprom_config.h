@@ -3,6 +3,11 @@
 
 #include "sdkconfig.h"
 
+#include <stdio.h>
+#include <string.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/queue.h"
 
 #define WRITE_BIT                          0 /*!< I2C master write */
 #define READ_BIT                           1  /*!< I2C master read */
@@ -43,5 +48,7 @@ bool manage_new_bytes( tBabelMsgHandler *manager,
 char* get_script(void);
 
 bool store_script(uint8_t* program);
+
+QueueHandle_t get_programmer_queue(void);
 #endif //EEPROM_CONFIG_H_
 
