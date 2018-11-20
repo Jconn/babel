@@ -29,6 +29,8 @@
 #include "ads1118.h"
 #include "uart_programmer.h"
 #include "display_manager.h"
+
+#include "vfs_native.h"
 #define EEPROM_I2C_ADDR (0x50)
 
 //
@@ -57,7 +59,9 @@
 //                      of the page
 //
 
-char* EEPROM_TAG = "eeprom";
+const char* babel_file_name = "babel_program.py";
+const char* babel_full_path = VFS_NATIVE_MOUNT_POINT"/babel_program.py";
+const char* EEPROM_TAG = "eeprom";
 static prepare_type_env_t b_prepare_write_env;
 
 static void i2c_example_master_init(void);
@@ -71,7 +75,7 @@ esp_gatt_char_prop_t b_property = 0;
 static QueueHandle_t eeprom_program_queue;
 static tBabelMsgHandler s_ble_manager;
 
-
+static bool babel_programmed = false;
 int32_t get_cached_profile(void)
 {
     return eeprom_profile;
@@ -394,6 +398,7 @@ static void eeprom_poll(void* arg)
                     //store this for later - don't commit the first page until the end because otherwise the delta checker will freak out.
                     //TODO - move away from this lazy method of preventing conflict
                     program_length = msg.action_type.length;
+                    babel_programmed = false;
                     break;
 
                 case  programTransfer_pTransferAction_BLOCK_TRANSFER:
@@ -429,7 +434,24 @@ static void eeprom_poll(void* arg)
             if(current_profile != eeprom_profile)
             {
                 collect_string(current_profile);
+
                 //activate_profile(); 
+                //
+                //
+                // run boot-up script 'boot.py'
+                // Check if 'main.py' exists and run it
+                FILE *fd;
+                fd = fopen(babel_full_path, "wb");
+
+                if (!fd) {
+                    ESP_LOGE(EEPROM_TAG, "couldnt open program file");
+                }
+                else
+                {
+                    fputs(get_script(), fd);
+                    fclose(fd);
+                    babel_programmed = true;
+                }
             }
             eeprom_profile = current_profile;
 
@@ -443,6 +465,14 @@ static void eeprom_poll(void* arg)
     }
 }
 
+char* get_script_name(void)
+{
+    if(!babel_programmed)
+    {
+        return NULL;
+    }
+    return babel_file_name; 
+}
 
 void eeprom_bt_profile(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param, struct gatts_profile_inst *profile)
 {
