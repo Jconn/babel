@@ -35,5 +35,5 @@ void process_byte(uint32_t *current_command,
                     tIicManager *manager
                     );
 
-void collect_string(int script_len);
+bool collect_string(int script_len, const uint16_t expected_crc);
 #endif

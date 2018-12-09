@@ -1,8 +1,6 @@
 #ifndef DISPLAY_MANAGER_H_
 #define DISPLAY_MANAGER_H_ 
 
-#include "u8g2.h"
-#include "u8g2_esp32_hal.h"
 
 
 #define I2C_EXAMPLE_MASTER_SCL_IO          19               /*!< gpio number for I2C master clock */

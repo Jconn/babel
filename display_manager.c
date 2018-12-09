@@ -1,5 +1,8 @@
 #include "display_manager.h"
 #include "esp_log.h"
+#include "gatts_demo.h"
+#include "u8g2.h"
+#include "u8g2_esp32_hal.h"
 
 bool u8g2_setup = false;
 static u8g2_t u8g2; // a structure which will contain all the data for one display
@@ -49,7 +52,7 @@ void hal_print_screen(char *output)
     {
         return;
     }
-
+    update_data( (uint8_t*)output, strlen(output));
     u8g2_ClearBuffer(&u8g2);
     ESP_LOGI("display", "printing output: %s", output); 
     u8g2_SetFont(&u8g2, u8g2_font_ncenB14_tr);

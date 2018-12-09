@@ -21,7 +21,7 @@
 
 #include "sdkconfig.h"
 
-#define PROFILE_NUM 3 
+#define PROFILE_NUM 2 
 #define PROFILE_A_APP_ID 0
 #define PROFILE_B_APP_ID 1
 #define PROFILE_C_APP_ID 2
@@ -54,5 +54,8 @@ void update_data(uint8_t *data, uint8_t len);
 
 //offloading this define for eeprom_config
 void eeprom_bt_profile(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param, struct gatts_profile_inst *profile);
+
+void ble_gatts_init(void);
+bool init_bt(void);
 #endif //GATTS_DEMO_H_
 

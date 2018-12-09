@@ -9,7 +9,6 @@
 #include "sample_capture.h"
 #include "mcp9700_temp.h"
 #include "df_robot_soil.h"
-#include "bmp280.h"
 #include "sensor_drive_constructor.h"
 
 #include "esp_bt.h"
@@ -29,8 +28,9 @@
 #include "ads1118.h"
 #include "uart_programmer.h"
 #include "display_manager.h"
+#include "babel_result.h"
+#include "babel_utils.h"
 
-#include "vfs_native.h"
 #define EEPROM_I2C_ADDR (0x50)
 
 //
@@ -38,7 +38,8 @@
 //
 #define PROFILE_ADDR 0 
 #define PROFILE_LEN 4
-
+#define CRC_LEN 2 
+#define METADATA_LEN (CRC_LEN + PROFILE_LEN)
 
 #define GATTS_SERVICE_UUID_TEST_B   0x00EE
 #define GATTS_CHAR_UUID_TEST_B      0xEE01
@@ -59,16 +60,18 @@
 //                      of the page
 //
 
+/* static variables */
+
+typedef struct _scriptMetadata {
+    uint32_t length;
+    uint16_t crc;
+} tScriptMetadata;
+
 const char* babel_file_name = "babel_program.py";
-const char* babel_full_path = VFS_NATIVE_MOUNT_POINT"/babel_program.py";
 const char* EEPROM_TAG = "eeprom";
 static prepare_type_env_t b_prepare_write_env;
 
-static void i2c_example_master_init(void);
-static void eeprom_poll(void* arg);
-static void deserialize_u32(uint8_t*in , uint32_t *out);
-static void serialize_u32(uint8_t*out , uint32_t in);
-static int32_t eeprom_profile = 0xAABBDDEE;
+static int32_t eeprom_script_length = 0xAABBDDEE;
 static int32_t s_eeprom_read_page = 0;
 esp_gatt_char_prop_t b_property = 0;
 
@@ -76,9 +79,21 @@ static QueueHandle_t eeprom_program_queue;
 static tBabelMsgHandler s_ble_manager;
 
 static bool babel_programmed = false;
+
+
+
+
+/* static function */
+
+static bool get_script_metadata(tScriptMetadata* data);
+
+static void i2c_example_master_init(void);
+static void eeprom_poll(void* arg);
+static int store_script_metadata(uint32_t profile_val, uint16_t crc);
+
 int32_t get_cached_profile(void)
 {
-    return eeprom_profile;
+    return eeprom_script_length;
 }
 /*
 static void activate_profile(int32_t profile)
@@ -106,6 +121,7 @@ static void activate_profile(int32_t profile)
     }
 }
 */
+
 
 bool process_prom_msg(tBabelMsgHandler *manager)
 {
@@ -288,32 +304,36 @@ esp_err_t eeprom_write(uint8_t page_addr, int length, uint8_t* inBuffer)
     return ret;
 }
 
-int set_profile(uint32_t profile_val)
+static int store_script_metadata(uint32_t profile_val, uint16_t crc)
 {
-    uint8_t raw_buf[PROFILE_LEN];
-    serialize_u32(raw_buf, profile_val);
+    uint8_t raw_buf[METADATA_LEN];
+    uint32_t offset = 0;
+    offset += serialize_u32(&(raw_buf[offset]), profile_val);
+    offset += serialize_u16(&(raw_buf[offset]), crc);
     return eeprom_write(
             PROFILE_ADDR,
-            PROFILE_LEN,
+            METADATA_LEN,
             raw_buf);
 }
 
-uint32_t get_eeprom_profile(void)
+
+bool get_script_metadata(tScriptMetadata* data)
 {
-    uint8_t profile[10];
+    uint8_t profile[EEPROM_PAGE_LENGTH];
+
     if(eeprom_read(PROFILE_ADDR,
-                PROFILE_LEN,
+                EEPROM_PAGE_LENGTH,
                 profile) == ESP_FAIL)
     {
         ESP_LOGE("eeprom", "i2c read failed"); 
         
-        return -1;
+        return false;
     }
-    
+
     ESP_LOGD("eeprom", "i2c read success"); 
-    uint32_t out;
-    deserialize_u32(profile,&out); 
-    return out;
+    deserialize_u32(profile,&(data->length)); 
+    deserialize_u16(&(profile[4]),&(data->crc)); 
+    return true;
 }
 
 void eeprom_init(void* arg)
@@ -327,21 +347,6 @@ void eeprom_init(void* arg)
                  NULL);
 }
 
-static void deserialize_u32(uint8_t*in , uint32_t *out)
-{
-    *out = (in[0])    |
-        (in[1] << 8)  |
-        (in[2] << 16) | 
-        (in[3] << 24); 
-}
-
-static void serialize_u32(uint8_t*out , uint32_t in)
-{
-    out[0] = in & 0xFF;
-    out[1] = (in >> 8 ) & 0xFF;
-    out[2] = (in >> 16) & 0xFF;
-    out[3] = (in >> 24) & 0xFF;
-}
 
 static void i2c_example_master_init(void)
 {
@@ -374,6 +379,9 @@ static void eeprom_poll(void* arg)
     activate_adc();
     /* setup display */
 
+    init_bt();
+    ble_gatts_init();
+
     set_display();
     ext_adc measurement;
     default_one_shot_config(&measurement);
@@ -383,6 +391,7 @@ static void eeprom_poll(void* arg)
             3, //number of elements the queue can hold
             sizeof(programTransfer) //the size of a queue element
             );
+    bool perform_load = true;
     int program_length = -1;  
     int current_length = 0;
     while (1) {
@@ -399,6 +408,7 @@ static void eeprom_poll(void* arg)
                     //TODO - move away from this lazy method of preventing conflict
                     program_length = msg.action_type.length;
                     babel_programmed = false;
+                    perform_load = false;
                     break;
 
                 case  programTransfer_pTransferAction_BLOCK_TRANSFER:
@@ -418,9 +428,11 @@ static void eeprom_poll(void* arg)
 
                 case programTransfer_pTransferAction_END_MSG:
                     ESP_LOGI(EEPROM_TAG, "received msg end, crc %d", msg.action_type.crc);
-                    set_profile(program_length);
+                    store_script_metadata(program_length, msg.action_type.crc);
                     program_length = -1;
                     current_length = 0;
+                    vTaskDelay(50/ portTICK_RATE_MS);
+                    perform_load = true;
                     break;
                 default:
                     ESP_LOGE(EEPROM_TAG, "unknnown pmessage type: %d",msg.action);
@@ -428,38 +440,35 @@ static void eeprom_poll(void* arg)
             }
         }
         //TODO: explicit - not side effect way of synchronizing
-        if(program_length < 0)
+        if(perform_load)
         {
-            int32_t current_profile = get_eeprom_profile();
-            if(current_profile != eeprom_profile)
+            tScriptMetadata script_info;
+            if( get_script_metadata(&script_info) )
             {
-                collect_string(current_profile);
+                perform_load = false;
+                bool script_success = collect_string(script_info.length, script_info.crc);
 
-                //activate_profile(); 
-                //
-                //
-                // run boot-up script 'boot.py'
-                // Check if 'main.py' exists and run it
-                FILE *fd;
-                fd = fopen(babel_full_path, "wb");
 
-                if (!fd) {
-                    ESP_LOGE(EEPROM_TAG, "couldnt open program file");
-                }
-                else
+                if(script_success)
                 {
-                    fputs(get_script(), fd);
-                    fclose(fd);
-                    babel_programmed = true;
+                    // run boot-up script 'boot.py'
+                    // Check if 'main.py' exists and run it
+                    FILE *fd;
+                    fd = fopen(babel_full_path(), "wb");
+
+                    if (!fd) {
+                        ESP_LOGE(EEPROM_TAG, "couldnt open program file");
+                    }
+                    else
+                    {
+                        fputs(get_script(), fd);
+                        fclose(fd);
+                        babel_programmed = true;
+                    }
                 }
             }
-            eeprom_profile = current_profile;
+            eeprom_script_length = script_info.length;
 
-        }
-        else
-        {
-            if(current_length == 0)
-                hal_print_screen("loading script...");
         }
         vTaskDelay(5/ portTICK_RATE_MS);
     }

@@ -53,5 +53,7 @@ bool store_script(uint8_t* program);
 
 QueueHandle_t get_programmer_queue(void);
 
+uint16_t compute_crc16(uint8_t byte);
+
 #endif //EEPROM_CONFIG_H_
 

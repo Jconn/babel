@@ -17,8 +17,8 @@
 #include "sample_capture.h"
 #include "sensor_drive_constructor.h"
 #include "eeprom_config.h"
-#include "bmp280.h"
 #include "serial_driver.h"
+#include "babel_utils.h"
 
 #include "babel.pb.h"
 #include "pb_encode.h"
@@ -34,6 +34,7 @@
 #define I2C_EXAMPLE_MASTER_SCL_IO          26               /*!< gpio number for I2C master clock */
 #define I2C_EXAMPLE_MASTER_SDA_IO          27               /*!< gpio number for I2C master data  */
 
+#define BMP_280_PORT I2C_NUM_0
 
 #define I2C_SDA_ENABLE_IO 33
 #define I2C_SCL_ENABLE_IO 32
@@ -55,7 +56,6 @@ static int get_i2c(uint8_t *data_buf);
 static void perform_i2c_sensor_init_action(void);
 
 
-static int deserialize_u32(uint8_t*in , uint32_t *out);
 
 static int (*s_sensor_read_fn)(uint8_t* data_buf) = get_analog;
 
@@ -96,9 +96,9 @@ char* get_script(void)
     else return NULL;
 }
 
-void collect_string(int script_len)
+bool collect_string(int script_len, const uint16_t expected_crc)
 {
-    if(script_len < 0) return;
+    if(script_len < 0) return false;
     int page = 1;
     //cycle through and read the rest of the pages
     for(int offset = 0; offset < script_len;  offset+=16)
@@ -107,12 +107,23 @@ void collect_string(int script_len)
         page++;
     }
 
-    ESP_LOGI(tag, "found script of length %d, data:\n", script_len); 
+    ESP_LOGI(tag, "found script of length %d, crc %d, data:\n", 
+            script_len, expected_crc); 
+
     esp_log_buffer_char(tag, script, script_len);
 
     //null-terminator
     script[script_len] = 0;
-    script_read = true;
+    //now compute the crc, and if crc is faulty, cancel the whole operation
+    const uint16_t calculated_crc = compute_crc16_buffer(script, script_len); 
+    if(calculated_crc == expected_crc)
+    {
+        script_read = true;
+        return true;
+    }
+    
+    ESP_LOGE(tag, "crc failed, expected: %d, actual:%d\n", expected_crc, calculated_crc); 
+    return false;
 }
 
 void activate_profile(void)
@@ -454,23 +465,5 @@ static int get_i2c(uint8_t *data_buf)
         }
     }
     return data_buf_index;
-}
-
-static int deserialize_u32(uint8_t*in , uint32_t *out)
-{
-    *out = (in[0])    |
-        (in[1] << 8)  |
-        (in[2] << 16) | 
-        (in[3] << 24); 
-    return 4;
-}
-
-//unused
-void serialize_u32(uint8_t*out , uint32_t in)
-{
-    out[0] = in & 0xFF;
-    out[1] = (in >> 8 ) & 0xFF;
-    out[2] = (in >> 16) & 0xFF;
-    out[3] = (in >> 24) & 0xFF;
 }
 
