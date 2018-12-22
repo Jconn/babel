@@ -29,7 +29,6 @@
 #include "uart_programmer.h"
 #include "display_manager.h"
 #include "babel_result.h"
-#include "babel_utils.h"
 
 #define EEPROM_I2C_ADDR (0x50)
 
@@ -95,246 +94,6 @@ int32_t get_cached_profile(void)
 {
     return eeprom_script_length;
 }
-/*
-static void activate_profile(int32_t profile)
-{
-    switch(profile)
-    {
-        case SENS_MCP9700:
-            ESP_LOGI("eeprom", "activating mcp9700"); 
-            activate_mpc9700(get_active_sensor());
-            break;
-        case SENS_SOIL_ANALOG:
-            activate_df_robot_soil(get_active_sensor() );
-            ESP_LOGI("eeprom", "activating soil sensor"); 
-            break;
-        case SENS_MAG_FIELD_ANALOG:
-            ESP_LOGI("eeprom", "activating mag sensor"); 
-            break;
-        case SENS_BMP_280:
-            ESP_LOGI("eeprom", "activating bmp 280"); 
-            activate_bmp280(get_active_sensor());
-            break;
-        default:
-            ESP_LOGI("eeprom", "unknown profile"); 
-            break;
-    }
-}
-*/
-
-
-bool process_prom_msg(tBabelMsgHandler *manager)
-{
-
-    PromMessage msg = PromMessage_init_zero;
-
-    /* Create a stream that reads from the buffer. */
-    pb_istream_t stream = pb_istream_from_buffer(manager->msg_bytes,
-            manager->current_msg_length);
-
-    /* Now we are ready to decode the message. */
-    bool status = pb_decode(&stream, PromMessage_fields, &msg);
-    if(!status)
-    {
-        ESP_LOGI(EEPROM_TAG, "failed to parse message of len: %d",manager->current_msg_length);
-        return false;
-    }
-    int page = msg.page;
-    switch(msg.type)
-    {
-        case PromMessage_promType_WRITE: 
-            {
-                int len = msg.payload.size;
-                if(len > 16)
-                {
-                    ESP_LOGI(EEPROM_TAG, "len too big: %d",len);
-                    return false;
-                }
-                ESP_LOGI(EEPROM_TAG, "eeprom page %d write len %d",page, len);
-                //write the eeprom page 
-                eeprom_write(page, len, msg.payload.bytes); 
-            }
-            break;
-        case PromMessage_promType_READ: 
-            {
-                int len = 16;
-                //set up for a read - if this characteristic is read
-                //then trigger an eeprom read to the page
-                ESP_LOGI(EEPROM_TAG, "eeprom page %d read len %d",page, len);
-                s_eeprom_read_page = page;
-            }
-            break;
-        default:
-            ESP_LOGI(EEPROM_TAG, "unknown command: %d",msg.type);
-            break;
-    }
-    return true;
-}
-
-bool manage_new_bytes( tBabelMsgHandler *manager,
-                        uint8_t *new_data,
-                        uint32_t new_data_len,
-                        bool(*msg_handler)(tBabelMsgHandler*) )
-{
-    char* byte_manager = "new_bytes";
-    if(!manager->processing_msg)
-    {
-        ESP_LOGI(byte_manager, 
-            "beginning message processing of length %d",new_data[0]);
-        manager->processing_msg = true;
-        manager->total_msg_length = new_data[0];
-        memcpy(manager->msg_bytes,
-                &(new_data[1]),
-                new_data_len-1);
-        manager->current_msg_length = new_data_len-1; 
-    }
-    else
-    {
-        ESP_LOGI(byte_manager, "appending to msg, on byte %d", manager->current_msg_length);
-        memcpy(&(manager->msg_bytes[manager->current_msg_length]),
-                &(new_data[0]), new_data_len);
-        manager->current_msg_length  += new_data_len;
-    }
-
-    if(manager->current_msg_length >= manager->total_msg_length)
-    {
-        ESP_LOGI(byte_manager, "msg processing complete");
-        manager->processing_msg = false;
-        return msg_handler(manager);
-    }
-
-    return false;
-}
-
-esp_err_t eeprom_read(uint8_t page_addr, int length, uint8_t* outBuffer)
-{
-    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
-    //start condition
-    i2c_master_start(cmd);
-
-
-    uint8_t i2c_addr = EEPROM_I2C_ADDR | (page_addr/16);
-
-    //addr write
-    i2c_master_write_byte(cmd,
-                    (i2c_addr << 1 ) | WRITE_BIT, ACK_CHECK_EN);
-    //setting page addr
-    i2c_master_write_byte(cmd, (page_addr % 16) * 16, ACK_CHECK_EN);
-    
-    //repeated start condition for next txn 
-    i2c_master_start(cmd);
-    
-    //addr write for the read txn 
-    i2c_master_write_byte(cmd,
-                    (i2c_addr << 1 ) | READ_BIT, ACK_CHECK_EN);
-
-    //the eeprom datasheet specs that ACK is required on 
-    //all bytes, not just the first n-1 bytes
-    //read bytes
-    i2c_master_read(cmd, outBuffer, length-1, ACK_VAL);
-    i2c_master_read_byte(cmd, &(outBuffer[length-1]), NACK_VAL);
-//
-    //final stop condition
-    i2c_master_stop(cmd);
-    esp_err_t ret = i2c_master_cmd_begin(
-            EEPROM_PORT, 
-            cmd,
-            1000 / portTICK_RATE_MS);
-    i2c_cmd_link_delete(cmd);
-    return ret;
-}
-
-bool store_script(uint8_t* program)
-{
-    ESP_LOGI(EEPROM_TAG, "writing program of length %d: ", strlen((char*)program) ); 
-    int script_len = strlen((char*)program);
-    int offset = 0;
-    uint8_t first_page[16];
-    memset(first_page, 0, sizeof(first_page));
-    serialize_u32(first_page, script_len);
-
-    memcpy(&(first_page[4]), program, 12);
-
-    eeprom_write(0, EEPROM_PAGE_LENGTH, first_page);
-
-    if(script_len < 12)
-    {
-        return true;
-    }
-    offset += 12;
-
-    int page = 1;
-    //cycle through and read the rest of the pages
-    for(; offset < script_len;  offset+=16)
-    {
-        eeprom_write(page, 16, &(program[offset]));
-        page++;
-    }
-    return true;
-}
-
-esp_err_t eeprom_write(uint8_t page_addr, int length, uint8_t* inBuffer)
-{
-    ESP_LOGI(EEPROM_TAG, "eWrite: page %d, len %d, value: ", page_addr, length); 
-    
-    //
-    // there are 8 sections of 256 bytes 
-    // so only 16 pages per section
-    // the api to this eeprom abstracts this away
-    //
-    uint8_t i2c_addr = EEPROM_I2C_ADDR | (page_addr/16);
-    esp_log_buffer_hex(EEPROM_TAG, inBuffer, length);
-    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
-    i2c_master_start(cmd);
-    i2c_master_write_byte(cmd,
-            (i2c_addr << 1 ) | WRITE_BIT, ACK_CHECK_EN);
-
-    //the entire block is the word
-    i2c_master_write_byte(cmd, 16 * (page_addr%16), ACK_CHECK_EN);
-    i2c_master_write(cmd, inBuffer, length, ACK_CHECK_EN);
-
-    i2c_master_stop(cmd);
-
-    esp_err_t ret = i2c_master_cmd_begin(
-            EEPROM_PORT,
-            cmd,
-            1000 / portTICK_RATE_MS);
-
-    i2c_cmd_link_delete(cmd);
-    return ret;
-}
-
-static int store_script_metadata(uint32_t profile_val, uint16_t crc)
-{
-    uint8_t raw_buf[METADATA_LEN];
-    uint32_t offset = 0;
-    offset += serialize_u32(&(raw_buf[offset]), profile_val);
-    offset += serialize_u16(&(raw_buf[offset]), crc);
-    return eeprom_write(
-            PROFILE_ADDR,
-            METADATA_LEN,
-            raw_buf);
-}
-
-
-bool get_script_metadata(tScriptMetadata* data)
-{
-    uint8_t profile[EEPROM_PAGE_LENGTH];
-
-    if(eeprom_read(PROFILE_ADDR,
-                EEPROM_PAGE_LENGTH,
-                profile) == ESP_FAIL)
-    {
-        ESP_LOGE("eeprom", "i2c read failed"); 
-        
-        return false;
-    }
-
-    ESP_LOGD("eeprom", "i2c read success"); 
-    deserialize_u32(profile,&(data->length)); 
-    deserialize_u16(&(profile[4]),&(data->crc)); 
-    return true;
-}
 
 void eeprom_init(void* arg)
 {
@@ -391,9 +150,8 @@ static void eeprom_poll(void* arg)
             3, //number of elements the queue can hold
             sizeof(programTransfer) //the size of a queue element
             );
-    bool perform_load = true;
-    int program_length = -1;  
-    int current_length = 0;
+
+    ScriptController script_controller; 
     while (1) {
          
         programTransfer msg;
@@ -406,71 +164,42 @@ static void eeprom_poll(void* arg)
                     ESP_LOGI(EEPROM_TAG, "received msg begin, len %d", msg.action_type.length);
                     //store this for later - don't commit the first page until the end because otherwise the delta checker will freak out.
                     //TODO - move away from this lazy method of preventing conflict
-                    program_length = msg.action_type.length;
-                    babel_programmed = false;
-                    perform_load = false;
+                    script_controller.new_script(msg.action_type.length);
                     break;
 
                 case  programTransfer_pTransferAction_BLOCK_TRANSFER:
                     ESP_LOGI(EEPROM_TAG, "received msg block %d", msg.action_type.payload.size);
-                    for(int i = 0; i < msg.action_type.payload.size; i+=16)
-                    {
-#define EPAGE_SIZE 16
-                        int page_length = msg.action_type.payload.size 
-                            - i > EPAGE_SIZE ?
-                            EPAGE_SIZE : msg.action_type.payload.size - i; 
-                        current_length += EPAGE_SIZE;
-                        eeprom_write(current_length/EPAGE_SIZE,
-                                page_length,
-                                &(msg.action_type.payload.bytes[i])); 
-                    }
+                    script_controller.append_data(msg.action_type.payload.bytes,
+                                    msg.action_type.payload.size);
                     break;
 
                 case programTransfer_pTransferAction_END_MSG:
                     ESP_LOGI(EEPROM_TAG, "received msg end, crc %d", msg.action_type.crc);
-                    store_script_metadata(program_length, msg.action_type.crc);
-                    program_length = -1;
-                    current_length = 0;
-                    vTaskDelay(50/ portTICK_RATE_MS);
-                    perform_load = true;
+                    script_controller.validate_script(msg.action_type.crc);
                     break;
                 default:
                     ESP_LOGE(EEPROM_TAG, "unknnown pmessage type: %d",msg.action);
                     break;
             }
         }
-        //TODO: explicit - not side effect way of synchronizing
-        if(perform_load)
+
+        if(script_controller.script_valid())
         {
-            tScriptMetadata script_info;
-            if( get_script_metadata(&script_info) )
-            {
-                perform_load = false;
-                bool script_success = collect_string(script_info.length, script_info.crc);
+            // run boot-up script 'boot.py'
+            // Check if 'main.py' exists and run it
+            FILE *fd;
+            fd = fopen(script_controller.get_script_file(), "wb");
 
-
-                if(script_success)
-                {
-                    // run boot-up script 'boot.py'
-                    // Check if 'main.py' exists and run it
-                    FILE *fd;
-                    fd = fopen(babel_full_path(), "wb");
-
-                    if (!fd) {
-                        ESP_LOGE(EEPROM_TAG, "couldnt open program file");
-                    }
-                    else
-                    {
-                        fputs(get_script(), fd);
-                        fclose(fd);
-                        babel_programmed = true;
-                    }
-                }
+            if (!fd) {
+                ESP_LOGE(EEPROM_TAG, "couldnt open program file");
             }
-            eeprom_script_length = script_info.length;
-
+            else
+            {
+                fputs(get_script(), fd);
+                fclose(fd);
+                babel_programmed = true;
+            }
         }
-        vTaskDelay(5/ portTICK_RATE_MS);
     }
 }
 

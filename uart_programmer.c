@@ -15,7 +15,7 @@
 #include "driver/uart.h"
 #include "esp_log.h"
 #include "uart_programmer.h"
-#include "eeprom_config.h"
+#include "eeprom_controller.hpp"
 static const char *TAG = "uart_events";
 
 #include "babel.pb.h"

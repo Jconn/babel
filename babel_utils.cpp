@@ -2,9 +2,8 @@
 
 static uint16_t compute_crc16(const uint8_t byte, const uint16_t orig_crc);
 
-uint16_t compute_crc16_buffer(uint8_t* buffer, size_t len)
+uint16_t compute_crc16_buffer(uint8_t* buffer, size_t len, uint16_t crc)
 {
-    uint16_t crc = 0; /* CRC value is 16bit */
     for(size_t i = 0; i < len; ++i)
     {
         crc = compute_crc16(buffer[i], crc);
@@ -69,3 +68,13 @@ static uint16_t compute_crc16(const uint8_t byte, const uint16_t orig_crc)
     return crc;
 }
 
+
+void crc_advancer::add_buffer(uint8_t* buffer, size_t len)
+{
+    m_crc = compute_crc16_buffer(buffer, len, m_crc);
+}
+
+void crc_advancer::add_byte(const uint8_t byte, uint16_t orig_crc)
+{
+    m_crc = compute_crc16(byte, orig_crc);
+}
