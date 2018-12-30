@@ -1,17 +1,7 @@
-#include "babel_utils.h"
+#include "babel_utils.hpp"
 
-static uint16_t compute_crc16(const uint8_t byte, const uint16_t orig_crc);
 
-uint16_t compute_crc16_buffer(uint8_t* buffer, size_t len, uint16_t crc)
-{
-    for(size_t i = 0; i < len; ++i)
-    {
-        crc = compute_crc16(buffer[i], crc);
-    }
-    return crc;
-}
-
-int deserialize_u32(uint8_t*in , uint32_t *out)
+int babel::deserialize_u32(uint8_t*in , uint32_t *out)
 {
     *out = (in[0])    |
         (in[1] << 8)  |
@@ -20,7 +10,7 @@ int deserialize_u32(uint8_t*in , uint32_t *out)
     return 4;
 }
 
-int serialize_u32(uint8_t*out , uint32_t in)
+int babel::serialize_u32(uint8_t*out , uint32_t in)
 {
     out[0] = in & 0xFF;
     out[1] = (in >> 8 ) & 0xFF;
@@ -30,7 +20,7 @@ int serialize_u32(uint8_t*out , uint32_t in)
 }
 
 
-int deserialize_u16(uint8_t *in , uint16_t *out)
+int babel::deserialize_u16(uint8_t *in , uint16_t *out)
 {
     *out = (in[0])    |
         (in[1] << 8); 
@@ -38,14 +28,23 @@ int deserialize_u16(uint8_t *in , uint16_t *out)
     return 2;
 }
 
-int serialize_u16(uint8_t*out , uint16_t in)
+int babel::serialize_u16(uint8_t*out , uint16_t in)
 {
     out[0] = in & 0xFF;
     out[1] = (in >> 8 ) & 0xFF;
     return 2;
 }
 
-static uint16_t compute_crc16(const uint8_t byte, const uint16_t orig_crc)
+uint16_t crc_advancer::compute_crc16_buffer(uint8_t* buffer, size_t len, uint16_t crc)
+{
+    for(size_t i = 0; i < len; ++i)
+    {
+        crc = compute_crc16(buffer[i], crc);
+    }
+    return crc;
+}
+
+uint16_t crc_advancer::compute_crc16(const uint8_t byte, const uint16_t orig_crc)
 {
     //random generator i got from sunshine
     const uint16_t generator = 0x1021;	/* divisor is 16bit */

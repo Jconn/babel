@@ -5,11 +5,6 @@
 #include <string.h>
 #include "driver/i2c.h"
 #include "esp_log.h"
-#include "eeprom_config.h"
-#include "sample_capture.h"
-#include "mcp9700_temp.h"
-#include "df_robot_soil.h"
-#include "sensor_drive_constructor.h"
 
 #include "esp_bt.h"
 #include "esp_gap_ble_api.h"
@@ -19,17 +14,19 @@
 #include "esp_bt_main.h"
 #include "esp_gatt_common_api.h"
 
+extern "C" {
 #include "babel.pb.h"
 #include "pb_encode.h"
 #include "pb_decode.h"
 #include "pb_common.h"
-
-#include "gatts_demo.h"
 #include "ads1118.h"
 #include "uart_programmer.h"
 #include "display_manager.h"
-#include "babel_result.h"
-
+#include "sample_capture.h"
+#include "gatts_demo.h"
+}
+#include "script_event_loop.hpp"
+#include "script_controller.hpp"
 #define EEPROM_I2C_ADDR (0x50)
 
 //
@@ -70,32 +67,24 @@ const char* babel_file_name = "babel_program.py";
 const char* EEPROM_TAG = "eeprom";
 static prepare_type_env_t b_prepare_write_env;
 
-static int32_t eeprom_script_length = 0xAABBDDEE;
-static int32_t s_eeprom_read_page = 0;
 esp_gatt_char_prop_t b_property = 0;
 
 static QueueHandle_t eeprom_program_queue;
-static tBabelMsgHandler s_ble_manager;
 
-static bool babel_programmed = false;
-
+ScriptController script_controller; 
 
 
 
 /* static function */
 
-static bool get_script_metadata(tScriptMetadata* data);
-
-static void i2c_example_master_init(void);
 static void eeprom_poll(void* arg);
-static int store_script_metadata(uint32_t profile_val, uint16_t crc);
 
-int32_t get_cached_profile(void)
+bool script_ready(void)
 {
-    return eeprom_script_length;
+    return script_controller.get_script_file() != NULL;
 }
 
-void eeprom_init(void* arg)
+void script_controller_event_loop_init(void* arg)
 {
     ESP_LOGI("eeprom", "starting eeprom task"); 
     xTaskCreate(eeprom_poll, 
@@ -107,6 +96,7 @@ void eeprom_init(void* arg)
 }
 
 
+/*
 static void i2c_example_master_init(void)
 {
     int i2c_master_port = EEPROM_PORT;
@@ -124,6 +114,8 @@ static void i2c_example_master_init(void)
                        false, //micropy arg - looks like slave feature
                        0);
 }
+
+*/
 
 QueueHandle_t get_programmer_queue(void)
 {
@@ -145,13 +137,15 @@ static void eeprom_poll(void* arg)
     ext_adc measurement;
     default_one_shot_config(&measurement);
 
+    
+    script_controller.init_fs();
+    script_controller.verify_eeprom_valid();
 
     eeprom_program_queue = xQueueCreate(
             3, //number of elements the queue can hold
             sizeof(programTransfer) //the size of a queue element
             );
-
-    ScriptController script_controller; 
+    bool cached_valid = false;
     while (1) {
          
         programTransfer msg;
@@ -185,31 +179,16 @@ static void eeprom_poll(void* arg)
 
         if(script_controller.script_valid())
         {
-            // run boot-up script 'boot.py'
-            // Check if 'main.py' exists and run it
-            FILE *fd;
-            fd = fopen(script_controller.get_script_file(), "wb");
-
-            if (!fd) {
-                ESP_LOGE(EEPROM_TAG, "couldnt open program file");
-            }
-            else
-            {
-                fputs(get_script(), fd);
-                fclose(fd);
-                babel_programmed = true;
-            }
+            if(!cached_valid)
+                script_controller.commit_script();
+            cached_valid = true;
         }
+        else
+        {
+            cached_valid = false;
+        }
+        vTaskDelay(1 / portTICK_PERIOD_MS);
     }
-}
-
-char* get_script_name(void)
-{
-    if(!babel_programmed)
-    {
-        return NULL;
-    }
-    return babel_file_name; 
 }
 
 void eeprom_bt_profile(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param, struct gatts_profile_inst *profile)
@@ -225,17 +204,10 @@ void eeprom_bt_profile(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_b
         esp_ble_gatts_create_service(gatts_if, &profile->service_id, GATTS_NUM_HANDLE_TEST_B);
         break;
     case ESP_GATTS_READ_EVT: {
-        ESP_LOGI(EEPROM_TAG, "eeprom page read evt(%d), conn_id %d, trans_id %d, handle %d\n",s_eeprom_read_page, param->read.conn_id, param->read.trans_id, param->read.handle);
         esp_gatt_rsp_t rsp;
         memset(&rsp, 0, sizeof(esp_gatt_rsp_t));
         rsp.attr_value.handle = param->read.handle;
         //return the page that was read, and the whole eeprom page
-        rsp.attr_value.value[0] = s_eeprom_read_page;
-        eeprom_read(s_eeprom_read_page, 16, rsp.attr_value.value + 1);
-        rsp.attr_value.len = 17;
-        //int32_t profile = get_cached_profile();
-        //rsp.attr_value.len = 4;
-        //serialize_u32(rsp.attr_value.value, profile);
         esp_ble_gatts_send_response(gatts_if, param->read.conn_id, param->read.trans_id,
                                     ESP_GATT_OK, &rsp);
         break;
@@ -285,15 +257,6 @@ void eeprom_bt_profile(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_b
             }
             
         }
-        if(param->write.len !=0)
-        {
-
-            manage_new_bytes(&s_ble_manager,
-                    param->write.value,
-                    param->write.len,
-                    process_prom_msg);
-        }
-
         example_write_event_env(gatts_if, &b_prepare_write_env, param);
         break;
                               }
@@ -308,19 +271,21 @@ void eeprom_bt_profile(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_b
     case ESP_GATTS_UNREG_EVT:
         break;
     case ESP_GATTS_CREATE_EVT:
-        ESP_LOGI(EEPROM_TAG, "CREATE_SERVICE_EVT, status %d,  service_handle %d\n", param->create.status, param->create.service_handle);
-        profile->service_handle = param->create.service_handle;
-        profile->char_uuid.len = ESP_UUID_LEN_16;
-        profile->char_uuid.uuid.uuid16 = GATTS_CHAR_UUID_TEST_B;
+        {
+            ESP_LOGI(EEPROM_TAG, "CREATE_SERVICE_EVT, status %d,  service_handle %d\n", param->create.status, param->create.service_handle);
+            profile->service_handle = param->create.service_handle;
+            profile->char_uuid.len = ESP_UUID_LEN_16;
+            profile->char_uuid.uuid.uuid16 = GATTS_CHAR_UUID_TEST_B;
 
-        esp_ble_gatts_start_service(profile->service_handle);
-        b_property = ESP_GATT_CHAR_PROP_BIT_READ | ESP_GATT_CHAR_PROP_BIT_WRITE | ESP_GATT_CHAR_PROP_BIT_NOTIFY;
-        esp_err_t add_char_ret =esp_ble_gatts_add_char( profile->service_handle, &profile->char_uuid,
-                                                        ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE,
-                                                        b_property,
-                                                        NULL, NULL);
-        if (add_char_ret){
-            ESP_LOGE(EEPROM_TAG, "add char failed, error code =%x",add_char_ret);
+            esp_ble_gatts_start_service(profile->service_handle);
+            b_property = ESP_GATT_CHAR_PROP_BIT_READ | ESP_GATT_CHAR_PROP_BIT_WRITE | ESP_GATT_CHAR_PROP_BIT_NOTIFY;
+            esp_err_t add_char_ret =esp_ble_gatts_add_char( profile->service_handle, &profile->char_uuid,
+                    ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE,
+                    b_property,
+                    NULL, NULL);
+            if (add_char_ret){
+                ESP_LOGE(EEPROM_TAG, "add char failed, error code =%x",add_char_ret);
+            }
         }
         break;
     case ESP_GATTS_ADD_INCL_SRVC_EVT:

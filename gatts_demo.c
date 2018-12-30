@@ -38,12 +38,10 @@
 
 #include "sdkconfig.h"
 
-#include "eeprom_config.h"
-
 #include "sample_capture.h"
-#include "sensor_drive_constructor.h"
-#include "serial_driver.h"
 #include "bt_app_core.h"
+
+#include "script_event_loop.hpp"
 
 /* Can run 'make menuconfig' to choose the GPIO to blink,
    or you can edit the following line and set a number here.
@@ -346,7 +344,7 @@ void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gat
         rsp.attr_value.handle = param->read.handle;
         uint8_t raw_data[100];
         int sample_len = 0;
-        sample_len = get_sensor(raw_data);
+        //TODO: fill in read
         rsp.attr_value.len = sample_len;
         for(int i = 0; i < sample_len; ++i)
         {
@@ -718,7 +716,7 @@ void babel_app_init()
     //bt_app_task_start_up();
     ESP_LOGI(GATTS_TAG, "starting eeprom task\n");
     ESP_ERROR_CHECK(esp_pm_configure(&pm_config)); 
-    eeprom_init(0);
+    script_controller_event_loop_init(0);
     
     /*
     vTaskDelay(10000 / portTICK_PERIOD_MS);
