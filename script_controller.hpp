@@ -31,6 +31,7 @@ public:
     void new_script(size_t len);
     void commit_script(void);
     bool verify_eeprom_valid(void); 
+    bool verify_fs_script(void); 
     void init_fs(void); 
 private:
     enum scriptAction {

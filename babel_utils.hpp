@@ -15,7 +15,8 @@ namespace babel {
 class crc_advancer {
 public:
     uint16_t get_crc(void) { return m_crc; }
-    void add_byte(const uint8_t byte, uint16_t orig_crc); 
+    void add_byte(uint8_t byte, uint16_t orig_crc); 
+    void add_byte(uint8_t byte) { add_byte(byte, m_crc);  }
     void add_buffer(uint8_t* buffer, size_t len);  
 private:
     uint16_t m_crc = 0;

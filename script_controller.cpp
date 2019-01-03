@@ -86,6 +86,44 @@ bool ScriptController::verify_eeprom_valid(void) {
     return validate_script( m_Eeprom.get_cached_crc() );
 }
 
+bool ScriptController::verify_fs_script(void) {
+    //if eeprom valid, then continue to trying to validate
+    //the file system
+    if(!verify_eeprom_valid())
+        return false;
+    
+    FILE *fd;
+    ESP_LOGI(m_Tag, "valid eeprom, validating file %s", m_ScriptFileName );
+    fd = fopen(m_ScriptFileName, "r");
+
+    if (!fd) {
+        ESP_LOGE(m_Tag, "couldnt open program file %s", m_ScriptFileName );
+    }
+    else
+    {
+        crc_advancer crc;
+        size_t file_len = 0;
+        while(1) {
+            char c = fgetc(fd);
+            if( feof(fd) ) {
+                break ;
+            }
+            file_len++;
+            crc.add_byte(c);
+        }
+        if(crc.get_crc() == m_ScriptCrc){
+            ESP_LOGI(m_Tag, "valid script file in fs");
+            m_ScriptCommited = true;
+            return true;
+        }
+        else {
+            ESP_LOGE(m_Tag, "failed to validate file of len %d, expecting %d", file_len, m_ScriptLength);
+        }
+    }
+    return false;
+}
+
+
 bool ScriptController::validate_script(uint16_t new_crc) { 
     uint32_t script_len = m_Eeprom.size(); 
     if(script_len > (m_Eeprom.max_size() ) )

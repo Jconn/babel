@@ -134,18 +134,18 @@ static void eeprom_poll(void* arg)
     ble_gatts_init();
 
     set_display();
-    ext_adc measurement;
-    default_one_shot_config(&measurement);
 
-    
+    bool cached_valid = false;
     script_controller.init_fs();
-    script_controller.verify_eeprom_valid();
-
+    //script_controller.verify_eeprom_valid();
+    //this will verify the eeprom and verify the script in the fs
+    if(script_controller.verify_fs_script()) {
+        cached_valid = true;
+    }
     eeprom_program_queue = xQueueCreate(
             3, //number of elements the queue can hold
             sizeof(programTransfer) //the size of a queue element
             );
-    bool cached_valid = false;
     while (1) {
          
         programTransfer msg;
