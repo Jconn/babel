@@ -21,6 +21,7 @@ extern "C"
 
     bool script_ready(void);
 
+    float ScriptControllerCalValue(char* key);
 #ifdef __cplusplus
 }
 #endif

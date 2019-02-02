@@ -84,6 +84,11 @@ bool script_ready(void)
     return script_controller.get_script_file() != NULL;
 }
 
+float ScriptControllerCalValue(char* key)
+{
+    return script_controller.get_cal_data(key);
+}
+
 void script_controller_event_loop_init(void* arg)
 {
     ESP_LOGI("eeprom", "starting eeprom task"); 
@@ -96,15 +101,14 @@ void script_controller_event_loop_init(void* arg)
 }
 
 
-/*
 static void i2c_example_master_init(void)
 {
-    int i2c_master_port = EEPROM_PORT;
+    i2c_port_t i2c_master_port = EEPROM_PORT;
     i2c_config_t conf;
     conf.mode = I2C_MODE_MASTER;
-    conf.sda_io_num = I2C_EXAMPLE_MASTER_SDA_IO;
+    conf.sda_io_num = static_cast<gpio_num_t>(I2C_EXAMPLE_MASTER_SDA_IO);
     conf.sda_pullup_en = GPIO_PULLUP_ENABLE;
-    conf.scl_io_num = I2C_EXAMPLE_MASTER_SCL_IO;
+    conf.scl_io_num = static_cast<gpio_num_t>(I2C_EXAMPLE_MASTER_SCL_IO);
     conf.scl_pullup_en = GPIO_PULLUP_ENABLE;
     conf.master.clk_speed = I2C_EXAMPLE_MASTER_FREQ_HZ;
     i2c_param_config(i2c_master_port, &conf);
@@ -115,7 +119,6 @@ static void i2c_example_master_init(void)
                        0);
 }
 
-*/
 
 QueueHandle_t get_programmer_queue(void)
 {
@@ -124,7 +127,8 @@ QueueHandle_t get_programmer_queue(void)
 
 static void eeprom_poll(void* arg)
 {
-
+    set_display();
+    i2c_example_master_init();
     init_adsdevice();
     //i2c_example_master_init();
     activate_adc();
@@ -133,7 +137,7 @@ static void eeprom_poll(void* arg)
     init_bt();
     ble_gatts_init();
 
-    set_display();
+    eeprom_consumer consumer;
 
     bool cached_valid = false;
     script_controller.init_fs();
@@ -154,25 +158,26 @@ static void eeprom_poll(void* arg)
                     (portTickType)0)) {
 
             switch(msg.action) {
-                case programTransfer_pTransferAction_BEGIN_MSG:
+                case programTransfer_pTransferAction_BEGIN_FILE_MESSAGE:
                     ESP_LOGI(EEPROM_TAG, "received msg begin, len %d", msg.action_type.length);
                     //store this for later - don't commit the first page until the end because otherwise the delta checker will freak out.
                     //TODO - move away from this lazy method of preventing conflict
-                    script_controller.new_script(msg.action_type.length);
+                    script_controller.new_script(consumer, msg.action_type.length);
                     break;
 
                 case  programTransfer_pTransferAction_BLOCK_TRANSFER:
                     ESP_LOGI(EEPROM_TAG, "received msg block %d", msg.action_type.payload.size);
-                    script_controller.append_data(msg.action_type.payload.bytes,
+                    
+                    consumer.write_data(msg.action_type.payload.bytes,
                                     msg.action_type.payload.size);
                     break;
 
                 case programTransfer_pTransferAction_END_MSG:
                     ESP_LOGI(EEPROM_TAG, "received msg end, crc %d", msg.action_type.crc);
-                    script_controller.validate_script(msg.action_type.crc);
+                    script_controller.validate_script(consumer, msg.action_type.crc);
                     break;
                 default:
-                    ESP_LOGE(EEPROM_TAG, "unknnown pmessage type: %d",msg.action);
+                    ESP_LOGE(EEPROM_TAG, "unknown pmessage type: %d",msg.action);
                     break;
             }
         }
@@ -182,10 +187,19 @@ static void eeprom_poll(void* arg)
             if(!cached_valid)
                 script_controller.commit_script();
             cached_valid = true;
+
+            //double-check that eeprom is valid
+            vTaskDelay(50 / portTICK_PERIOD_MS);
+            bool eeprom_valid = script_controller.confirm_eeprom();
+            if(!eeprom_valid)
+                cached_valid = false;
         }
         else
         {
             cached_valid = false;
+            if(script_controller.verify_fs_script()) {
+                cached_valid = true;
+            }
         }
         vTaskDelay(1 / portTICK_PERIOD_MS);
     }

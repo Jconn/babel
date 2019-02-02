@@ -12,12 +12,24 @@
 #define ACK_CHECK_EN                       0x1              /*!< I2C master will check ack from slave*/
 #define ACK_CHECK_DIS                      0x0              /*!< I2C master will not check ack from slave */
 
-bool eeprom_utils::append_data(const uint8_t *payload, size_t len)
+eeprom_utils::eeprom_utils(size_t metadata_page) 
+    : m_metadataPage(metadata_page) 
 {
-    uint16_t page_offset = (m_offset) % page_size; 
-    uint16_t end_byte = (m_offset + page_size) + len;
+
+}
+
+eeprom_utils::eeprom_utils(size_t metadata_page, size_t init_page) 
+    : m_scriptPageBegin(init_page), m_metadataPage(metadata_page) 
+{
+
+}
+
+bool eeprom_utils::write_data(const uint8_t *payload, size_t len, size_t offset)
+{
+    uint16_t page_offset = (offset) % page_size; 
+    uint16_t end_byte = (offset + page_size) + len;
     //adding the first page to this logic
-    uint16_t page_begin = (m_offset /page_size) + 1;
+    uint16_t page_begin = (offset /page_size) + m_scriptPageBegin;
     uint16_t page_end = end_byte/page_size;
     if ( (end_byte % page_size) > 0)
         page_end +=1;
@@ -41,7 +53,7 @@ bool eeprom_utils::append_data(const uint8_t *payload, size_t len)
         page_offset = 0;
 
     }
-    m_offset += len;
+    offset += len;
     ESP_LOGI(m_Tag, "appended data in pages %d through %d", page_begin, page_end);
     return true;
 
@@ -98,8 +110,8 @@ bool eeprom_utils::write_data(const uint8_t *data, uint16_t page, uint16_t lengt
 bool eeprom_utils::read_data(uint8_t *outData, uint16_t offset, uint16_t length)
 {
     //have to add the metadata size
-    offset += page_size; 
-
+    offset += page_size + m_scriptPageBegin * page_size; 
+    
     uint16_t page_offset = offset % page_size; 
     uint16_t end_byte = offset + length;
     uint16_t page_begin = offset/page_size;
@@ -118,6 +130,43 @@ bool eeprom_utils::read_data(uint8_t *outData, uint16_t offset, uint16_t length)
         data_offset += page_len_read;
         page_offset = 0;
     }
+    return true;
+}
+
+bool eeprom_controller::validate(size_t script_len, uint16_t new_crc) { 
+
+    const size_t i_step = 16;
+    uint8_t temp_buffer[i_step];
+    crc_advancer crc;
+
+
+    if(script_len == 0) {
+        return true;
+    }
+
+    if(script_len > max_size() )
+    {
+        ESP_LOGE(m_Tag, "script_len too large:  %d", script_len );
+        return false;
+    }
+
+
+    for (size_t i = 0; i < script_len; i+=i_step){
+        size_t len = i_step;
+        if((script_len - i) < i_step) len = script_len - i;
+        if(!read_data(temp_buffer, i, len))
+            ESP_LOGE(m_Tag, "read data failed");
+        crc.add_buffer(temp_buffer, len);
+    }
+
+    //check if the dumb thing is actually valid
+    if (crc != crc.get_crc() ) {
+        ESP_LOGE(m_Tag, "crc not matched expected: %d, calculated:%d", new_crc, crc.get_crc());
+        return false;
+    }
+
+    ESP_LOGI(m_Tag, "validated script of len %d with crc %d",
+            script_len, crc.get_crc());
     return true;
 }
 
@@ -179,35 +228,4 @@ bool eeprom_utils::read_page(uint8_t *outData, uint16_t page, uint16_t length, u
 }
  
 
-bool eeprom_utils::write_file_metadata(uint32_t profile_val, uint16_t crc)
-{
-    uint8_t raw_buf[page_size];
-    uint32_t offset = 0;
-    offset += babel::serialize_u32(&(raw_buf[offset]), profile_val);
-    offset += babel::serialize_u16(&(raw_buf[offset]), crc);
-    return write_data(
-            raw_buf,
-            mc_metaDataPage,
-            mc_metaDataLen);
-}
 
-
-bool eeprom_utils::populate_metadata(void)
-{
-    uint8_t raw_buf[page_size];
-    if(!read_page(raw_buf,
-            mc_metaDataPage,
-            mc_metaDataLen))
-    {
-        ESP_LOGE(m_Tag, "metadata pop failed "); 
-        return false;
-    }
-    uint32_t offset = 0;
-    uint32_t length;
-    uint16_t crc;
-    offset += babel::deserialize_u32(&(raw_buf[offset]), &length);
-    offset += babel::deserialize_u16(&(raw_buf[offset]), &crc);
-    m_crc = crc;
-    m_offset = length;
-    return true;
-}

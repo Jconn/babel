@@ -2,6 +2,11 @@
 #define __ADS_1118_H_
 #include "stdint.h"
 
+#define PIN_NUM_MISO 12 
+#define PIN_NUM_MOSI 13 
+#define PIN_NUM_CLK  14 
+#define PIN_NUM_ADC_CS   25 
+
 //[2:1] in config register - magic number for data 
 //                          sanitation
 #define NOP_VALID_VALUE (0x01)

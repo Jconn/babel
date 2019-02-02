@@ -3,14 +3,8 @@
 #include <string.h>
 #include <stdio.h>
 
-
-
 #include "ads1118.h"
   
-#define PIN_NUM_MISO 12 
-#define PIN_NUM_MOSI 13 
-#define PIN_NUM_CLK  14 
-#define PIN_NUM_CS   25 
 
 //To speed up transfers, every SPI transfer sends a bunch of lines. This define specifies how many. More means more memory use,
 //but less overhead for setting up / finishing transfers. Make sure 240 is dividable by this.
@@ -150,13 +144,13 @@ bool init_adsdevice(void)
     devcfg.cs_ena_posttrans = 2;
     devcfg.clock_speed_hz=100000;           //Clock out at 1 MHz
     devcfg.mode=1;                                //SPI mode 1 
-    devcfg.spics_io_num=PIN_NUM_CS;               //CS pin
+    devcfg.spics_io_num=PIN_NUM_ADC_CS;               //CS pin
     devcfg.queue_size=3;                          //We want to be able to queue 3 transactions at a time
     
     //Initialize the SPI bus
-    ret=spi_bus_initialize(HSPI_HOST, &buscfg, 1);
-    ESP_ERROR_CHECK(ret);
-    //Attach the LCD to the SPI bus
+    //ret=spi_bus_initialize(HSPI_HOST, &buscfg, 1);
+    //ESP_ERROR_CHECK(ret);
+    //Attach the ADC to the SPI bus
     ret=spi_bus_add_device(HSPI_HOST, &devcfg, &spi);
     ESP_ERROR_CHECK(ret);
     return ret;
