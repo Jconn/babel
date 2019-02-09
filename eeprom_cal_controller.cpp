@@ -5,12 +5,17 @@
 #include <memory>
 #include <cstring>
 
+eeprom_cal_controller::eeprom_cal_controller(size_t metadata_page)
+    : eeprom_utils(metadata_page) 
+{
+}
+
 bool eeprom_cal_controller::populate_metadata(void)
 {
-    uint8_t raw_buf[page_size];
+    uint8_t raw_buf[get_page_size()];
     if(!read_page(raw_buf,
             m_metadataPage,
-            page_size))
+            get_page_size()))
     {
         ESP_LOGE(m_Tag, "cal metadata pop failed "); 
         return false;
@@ -42,12 +47,28 @@ bool eeprom_cal_controller::validate_self() {
     {
         return false;
     }
-    return validate(m_metadata.length, m_metadata.crc);
+    bool valid = validate(m_metadata.length, m_metadata.crc);
+    if(valid)
+    {
+        populate_cal_data();
+    }
+    return valid;
+}
+
+bool eeprom_cal_controller::commit_changes(uint32_t new_len, uint16_t new_crc)
+{
+    const uint32_t end_page = eeprom_utils::get_last_page();
+    cal_metadata new_metadata;
+
+    new_metadata.crc = new_crc;
+    new_metadata.length = new_len;
+    new_metadata.start_page = end_page - (new_len/16 + 1);
+    return write_metadata(new_metadata);
 }
 
 bool eeprom_cal_controller::write_metadata(const cal_metadata& new_metadata)
 {
-    uint8_t raw_buf[page_size];
+    uint8_t raw_buf[get_page_size()];
     uint32_t offset = 0;
     offset += babel::serialize_u32(&(raw_buf[offset]), new_metadata.length);
     offset += babel::serialize_u16(&(raw_buf[offset]), new_metadata.crc);
@@ -82,7 +103,7 @@ bool eeprom_cal_controller::populate_cal_data(void) {
         }
         //read latest page
         if(!read_page(&(raw_buf[offset]),
-                    m_metadata.start_page + (i / eeprom_utils::page_size),
+                    m_metadata.start_page + (i / eeprom_utils::get_page_size()),
                     len))
         {
             ESP_LOGE(m_Tag, "cal read data failed");

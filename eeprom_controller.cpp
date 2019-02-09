@@ -19,7 +19,7 @@ eeprom_utils::eeprom_utils(size_t metadata_page)
 }
 
 eeprom_utils::eeprom_utils(size_t metadata_page, size_t init_page) 
-    : m_scriptPageBegin(init_page), m_metadataPage(metadata_page) 
+    :m_metadataPage(metadata_page), m_scriptPageBegin(init_page) 
 {
 
 }
@@ -40,7 +40,7 @@ bool eeprom_utils::write_data(const uint8_t *payload, size_t len, size_t offset)
 
         uint16_t page_len_write = page_thresholded_length(end_byte - i*page_size);
         page_len_write -= page_offset;
-        if (!write_data(&(payload[data_offset]), 
+        if (!write_page(&(payload[data_offset]), 
                             i,
                             page_len_write,
                             page_offset)) 
@@ -65,7 +65,7 @@ bool eeprom_utils::append_data(const std::vector <uint8_t> &data)
 }
 
 
-bool eeprom_utils::write_data(const uint8_t *data, uint16_t page, uint16_t length, uint16_t offset)
+bool eeprom_utils::write_page(const uint8_t *data, uint16_t page, uint16_t length, uint16_t offset)
 {
     ESP_LOGI(m_Tag, "eWrite: page %d, len %d, offset %d", page, length, offset); 
     if( (length + offset) > page_size)
@@ -133,7 +133,7 @@ bool eeprom_utils::read_data(uint8_t *outData, uint16_t offset, uint16_t length)
     return true;
 }
 
-bool eeprom_controller::validate(size_t script_len, uint16_t new_crc) { 
+bool eeprom_utils::validate(size_t script_len, uint16_t new_crc) { 
 
     const size_t i_step = 16;
     uint8_t temp_buffer[i_step];
@@ -160,7 +160,7 @@ bool eeprom_controller::validate(size_t script_len, uint16_t new_crc) {
     }
 
     //check if the dumb thing is actually valid
-    if (crc != crc.get_crc() ) {
+    if (new_crc != crc.get_crc() ) {
         ESP_LOGE(m_Tag, "crc not matched expected: %d, calculated:%d", new_crc, crc.get_crc());
         return false;
     }

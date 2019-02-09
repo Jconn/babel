@@ -26,10 +26,10 @@ bool eeprom_file_controller::validate_self() {
 
 bool eeprom_file_controller::populate_metadata(void)
 {
-    uint8_t raw_buf[page_size];
+    uint8_t raw_buf[get_page_size()];
     if(!read_page(raw_buf,
             m_metadataPage,
-            page_size))
+            get_page_size()))
     {
         ESP_LOGE(m_Tag, "cal metadata pop failed "); 
         return false;
@@ -54,9 +54,16 @@ bool eeprom_file_controller::get_metadata(file_metadata& data)
     return true;
 }
 
+bool eeprom_file_controller::commit_changes(uint32_t new_len, uint16_t new_crc)
+{
+    file_metadata new_metadata;
+    new_metadata.crc = new_crc;
+    new_metadata.length = new_len;
+    return write_metadata(new_metadata);
+}
 bool eeprom_file_controller::write_metadata(const file_metadata &new_metadata)
 {
-    uint8_t raw_buf[page_size];
+    uint8_t raw_buf[get_page_size()];
     uint32_t offset = 0;
     offset += babel::serialize_u32(&(raw_buf[offset]), new_metadata.length);
     offset += babel::serialize_u16(&(raw_buf[offset]), new_metadata.crc);

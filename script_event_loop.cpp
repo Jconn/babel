@@ -160,9 +160,11 @@ static void eeprom_poll(void* arg)
             switch(msg.action) {
                 case programTransfer_pTransferAction_BEGIN_FILE_MESSAGE:
                     ESP_LOGI(EEPROM_TAG, "received msg begin, len %d", msg.action_type.length);
-                    //store this for later - don't commit the first page until the end because otherwise the delta checker will freak out.
-                    //TODO - move away from this lazy method of preventing conflict
-                    script_controller.new_script(consumer, msg.action_type.length);
+                    consumer = script_controller.get_script_consumer();
+                    break;
+
+                case programTransfer_pTransferAction_BEGIN_CAL_MESSAGE:
+                    consumer = script_controller.get_cal_consumer();
                     break;
 
                 case  programTransfer_pTransferAction_BLOCK_TRANSFER:
@@ -176,6 +178,7 @@ static void eeprom_poll(void* arg)
                     ESP_LOGI(EEPROM_TAG, "received msg end, crc %d", msg.action_type.crc);
                     script_controller.validate_script(consumer, msg.action_type.crc);
                     break;
+
                 default:
                     ESP_LOGE(EEPROM_TAG, "unknown pmessage type: %d",msg.action);
                     break;
@@ -196,6 +199,7 @@ static void eeprom_poll(void* arg)
         }
         else
         {
+            script_controller.try_validate();
             cached_valid = false;
             if(script_controller.verify_fs_script()) {
                 cached_valid = true;

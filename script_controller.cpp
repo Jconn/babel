@@ -49,13 +49,26 @@ void ScriptController::commit_script(void) {
     m_ScriptInFs = true;
 }
 
-void ScriptController::new_script(size_t len) {
-    m_scriptEeprom.begin_new_file();
-}
-
 bool ScriptController::verify_eeprom_valid(void) {
 
     return m_scriptEeprom.validate_self();
+}
+
+bool ScriptController::validate_script(const eeprom_consumer& consumer, uint16_t new_crc)
+{
+    eeprom_utils* utils = consumer.m_utils;
+    if(!utils->commit_changes(consumer.data_consumed(),
+            new_crc))
+    {
+        return false;
+    }
+    return utils->validate_self();
+}
+
+bool ScriptController::try_validate(void)
+{
+    m_scriptEeprom.validate_self();
+    m_calDataEeprom.validate_self();
 }
 
 bool ScriptController::verify_fs_script(void) {
@@ -94,7 +107,25 @@ bool ScriptController::verify_fs_script(void) {
     return false;
 }
 
+eeprom_consumer ScriptController::get_script_consumer(void)
+{
+    eeprom_consumer new_consumer(&m_scriptEeprom);
+    return new_consumer;
+}
+
+eeprom_consumer ScriptController::get_cal_consumer(void)
+{
+    eeprom_consumer new_consumer(&m_calDataEeprom);
+    return new_consumer;
+}
 
 bool ScriptController::confirm_eeprom(void) {
     return m_scriptEeprom.confirm_valid();
 }
+
+
+float ScriptController::get_cal_data(char* key)
+{
+    return m_calDataEeprom.get_cal_data(key);
+}
+

@@ -13,16 +13,20 @@ class eeprom_utils {
         size_t size(void) { return m_offset;}
         bool append_data(const std::vector <uint8_t> &data);
         bool append_data(const uint8_t *payload, size_t len);
-        static bool write_data(const uint8_t *data, uint16_t page, uint16_t length, uint16_t offset = 0);
+        bool write_data(const uint8_t *payload, size_t len, size_t offset);
+        static bool write_page(const uint8_t *data, uint16_t page, uint16_t length, uint16_t offset = 0);
         static bool read_page(uint8_t *outData, uint16_t page, uint16_t length, uint16_t offset = 0);
         bool read_data(uint8_t *outData, uint16_t offset, uint16_t length);
         virtual bool populate_metadata(void) = 0;
+        virtual bool validate_self(void) = 0;
+        virtual bool commit_changes(uint32_t new_len, uint16_t new_crc) = 0;
         static size_t max_size(void) { return page_size * 0xFF;}
         
         bool validated() { return m_validated; }
         void set_validated(bool new_status){ m_validated = new_status; }
         bool confirm_eeprom();
-        static const size_t page_size = 16;
+        static constexpr size_t get_page_size() {return  page_size;}
+        static constexpr size_t get_last_page() { return total_pages - 1; }
     private:
         uint16_t page_thresholded_length(uint16_t raw_length) { 
             if (raw_length > page_size) return page_size;
@@ -38,9 +42,12 @@ class eeprom_utils {
         bool m_validated;
         size_t m_offset = 0;
         constexpr static const char* m_Tag = "eeController";
+        constexpr static size_t page_size = 16;
+        constexpr static size_t total_pages = 512;
 };
 
 class eeprom_consumer {
+    public:
     eeprom_consumer() {}
     eeprom_consumer(eeprom_utils* my_utils)
         :m_utils(my_utils)
@@ -70,7 +77,7 @@ class eeprom_consumer {
         return true;
     }
 
-    size_t data_consumed(void) { return m_offset;}
+    size_t data_consumed(void) const { return m_offset;}
     public:
         size_t m_offset = 0;
         eeprom_utils* m_utils = nullptr;

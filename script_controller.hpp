@@ -26,16 +26,17 @@ public:
         }
         return NULL;
     }
-    void new_script(size_t len);
     void commit_script(void);
     bool verify_eeprom_valid(void); 
     bool verify_fs_script(void); 
     void init_fs(void); 
     float get_cal_data(char* key);
-    bool validate_cal_data(void); 
     void populate_cal_data(void);
-    void set_active_reader(bool script_active);
     bool confirm_eeprom(void); 
+    eeprom_consumer get_script_consumer(void);
+    eeprom_consumer get_cal_consumer(void);
+    bool validate_script(const eeprom_consumer& consumer, uint16_t new_crc); 
+
 private:
     enum scriptAction {
         idle = 0,
@@ -45,9 +46,6 @@ private:
     };
     scriptAction m_Action;
     static constexpr const char* m_ScriptFileName = "/_#!#_spiffs/babel_program.py";
-
-    
-    bool validate_script(eeprom_utils* eeprom, uint16_t new_crc); 
 
     bool m_ScriptInFs;
     eeprom_file_controller m_scriptEeprom = eeprom_file_controller(0, 1);

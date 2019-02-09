@@ -19,7 +19,8 @@ class eeprom_file_controller: public eeprom_utils {
         uint16_t get_cached_crc(void) { return m_metadata.crc;} 
         uint16_t get_cached_length(void) { return m_metadata.length; }
         bool write_metadata(const file_metadata &new_metadata);
-        bool validate_self(void);
+        virtual bool validate_self(void);
+        virtual bool commit_changes(uint32_t new_len, uint16_t new_crc); 
         bool confirm_valid(void);
     private:
         file_metadata m_metadata;
