@@ -43,6 +43,8 @@ bool eeprom_cal_controller::get_cal_metadata(cal_metadata &data)
 }
 
 bool eeprom_cal_controller::validate_self() {
+
+    ESP_LOGI(m_Tag, "validating cal");
     if(!populate_metadata())
     {
         return false;
@@ -101,6 +103,10 @@ bool eeprom_cal_controller::populate_cal_data(void) {
     size_t offset = 0;
     const size_t i_step = 16;
     //need algorithm for string to float
+    //
+    ESP_LOGI(m_Tag,
+            "parsing cal of length %d", m_metadata.length);
+
     for (size_t i = 0; i < m_metadata.length; i+=i_step){
         //curtail length
         size_t len = i_step;
@@ -115,6 +121,9 @@ bool eeprom_cal_controller::populate_cal_data(void) {
             ESP_LOGE(m_Tag, "cal read data failed");
             return false;
         }
+        ESP_LOGI(m_Tag, "parsing cal data of len %d, value :", len);
+        esp_log_buffer_hex(m_Tag, raw_buf, len);
+
         //look for string
         for(size_t j = offset; j < offset + len; ++j)
         {
@@ -137,9 +146,14 @@ bool eeprom_cal_controller::populate_cal_data(void) {
                     std::string temp((char*)key); 
                     std::unique_ptr<std::string> safe_key = std::make_unique<std::string>(temp);
                     float value = key[j];
+                    memcpy(&value, &(raw_buf[j+1]), 4);
                     //m_CalData.add(std::pair<std::string,float>(safe_key, value) ); 
                     m_CalData[*safe_key] = value;
                     int unused_index = j + 4;
+
+                    ESP_LOGI(m_Tag,
+                            "found key value pair (%s,%f)",
+                            temp.c_str(), value);
 
                     memmove(raw_buf, 
                             &(raw_buf[unused_index]),
