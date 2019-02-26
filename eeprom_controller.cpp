@@ -30,7 +30,7 @@ bool eeprom_utils::write_data(const uint8_t *payload, size_t len, size_t offset)
     uint16_t end_byte = (offset + page_size) + len;
     //adding the first page to this logic
     uint16_t page_begin = (offset /page_size) + m_scriptPageBegin;
-    uint16_t page_end = end_byte/page_size;
+    uint16_t page_end = end_byte/page_size + m_scriptPageBegin;
     if ( (end_byte % page_size) > 0)
         page_end +=1;
 
@@ -107,10 +107,10 @@ bool eeprom_utils::write_page(const uint8_t *data, uint16_t page, uint16_t lengt
 }
 
 
-bool eeprom_utils::read_data(uint8_t *outData, uint16_t offset, uint16_t length)
+bool eeprom_utils::read_data(uint8_t *outData, uint16_t length, uint16_t offset)
 {
     //have to add the metadata size
-    offset += page_size + m_scriptPageBegin * page_size; 
+    offset +=  m_scriptPageBegin * page_size; 
     
     uint16_t page_offset = offset % page_size; 
     uint16_t end_byte = offset + length;
@@ -141,8 +141,9 @@ bool eeprom_utils::validate(size_t script_len, uint16_t new_crc) {
 
 
     if(script_len == 0) {
-        return true;
+        goto valid;
     }
+    set_validated(false);
 
     if(script_len > max_size() )
     {
@@ -150,11 +151,12 @@ bool eeprom_utils::validate(size_t script_len, uint16_t new_crc) {
         return false;
     }
 
+    ESP_LOGI(m_Tag, "attempting validate of len %d init page of %d", script_len, m_scriptPageBegin);
 
     for (size_t i = 0; i < script_len; i+=i_step){
         size_t len = i_step;
         if((script_len - i) < i_step) len = script_len - i;
-        if(!read_data(temp_buffer, i, len))
+        if(!read_data(temp_buffer, len, i))
             ESP_LOGE(m_Tag, "read data failed");
         crc.add_buffer(temp_buffer, len);
     }
@@ -165,8 +167,10 @@ bool eeprom_utils::validate(size_t script_len, uint16_t new_crc) {
         return false;
     }
 
+valid:
     ESP_LOGI(m_Tag, "validated script of len %d with crc %d",
             script_len, crc.get_crc());
+    set_validated(true);
     return true;
 }
 

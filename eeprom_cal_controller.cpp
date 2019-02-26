@@ -66,6 +66,12 @@ bool eeprom_cal_controller::commit_changes(uint32_t new_len, uint16_t new_crc)
     return write_metadata(new_metadata);
 }
 
+void eeprom_cal_controller::predict_begin_page(size_t total_length)
+{
+    const uint32_t end_page = eeprom_utils::get_last_page();
+    set_begin_page(end_page - (total_length/16 + 1));
+}
+
 bool eeprom_cal_controller::write_metadata(const cal_metadata& new_metadata)
 {
     uint8_t raw_buf[get_page_size()];
@@ -73,7 +79,7 @@ bool eeprom_cal_controller::write_metadata(const cal_metadata& new_metadata)
     offset += babel::serialize_u32(&(raw_buf[offset]), new_metadata.length);
     offset += babel::serialize_u16(&(raw_buf[offset]), new_metadata.crc);
     offset += babel::serialize_u32(&(raw_buf[offset]), new_metadata.start_page);
-    if(!write_data(
+    if(!write_page(
                 raw_buf,
                 m_metadataPage,
                 offset) ) 

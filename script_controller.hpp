@@ -10,6 +10,7 @@
 #include "eeprom_controller.hpp"
 #include "eeprom_cal_controller.hpp"
 #include "eeprom_file_controller.hpp"
+#include "eeprom_consumer.hpp"
 
 using typename std::size_t; 
 
@@ -35,8 +36,10 @@ public:
     bool confirm_eeprom(void); 
     eeprom_consumer get_script_consumer(void);
     eeprom_consumer get_cal_consumer(void);
-    bool validate_script(const eeprom_consumer& consumer, uint16_t new_crc); 
+    eeprom_consumer start_cal_programmer(size_t total_length);
+    bool commit_section(const eeprom_consumer& consumer, uint16_t new_crc); 
 
+    bool try_validate(void);
 private:
     enum scriptAction {
         idle = 0,
@@ -49,7 +52,7 @@ private:
 
     bool m_ScriptInFs;
     eeprom_file_controller m_scriptEeprom = eeprom_file_controller(0, 1);
-    eeprom_cal_controller m_calDataEeprom = eeprom_cal_controller(2000);
+    eeprom_cal_controller m_calDataEeprom = eeprom_cal_controller(eeprom_utils::get_last_page());
 
     constexpr static const char* m_Tag = "ScriptController";
 };

@@ -27,6 +27,8 @@ extern "C" {
 }
 #include "script_event_loop.hpp"
 #include "script_controller.hpp"
+#include "eeprom_consumer.hpp"
+
 #define EEPROM_I2C_ADDR (0x50)
 
 //
@@ -150,6 +152,7 @@ static void eeprom_poll(void* arg)
             3, //number of elements the queue can hold
             sizeof(programTransfer) //the size of a queue element
             );
+    bool editing = false;
     while (1) {
          
         programTransfer msg;
@@ -159,12 +162,16 @@ static void eeprom_poll(void* arg)
 
             switch(msg.action) {
                 case programTransfer_pTransferAction_BEGIN_FILE_MESSAGE:
-                    ESP_LOGI(EEPROM_TAG, "received msg begin, len %d", msg.action_type.length);
+                    editing = true;
+                    ESP_LOGI(EEPROM_TAG, "received file msg begin, len %d", msg.action_type.length);
                     consumer = script_controller.get_script_consumer();
                     break;
 
                 case programTransfer_pTransferAction_BEGIN_CAL_MESSAGE:
-                    consumer = script_controller.get_cal_consumer();
+                    ESP_LOGI(EEPROM_TAG, "received cal msg begin, len %d", msg.action_type.length);
+
+                    editing = true;
+                    consumer = script_controller.start_cal_programmer(msg.action_type.length);
                     break;
 
                 case  programTransfer_pTransferAction_BLOCK_TRANSFER:
@@ -176,7 +183,8 @@ static void eeprom_poll(void* arg)
 
                 case programTransfer_pTransferAction_END_MSG:
                     ESP_LOGI(EEPROM_TAG, "received msg end, crc %d", msg.action_type.crc);
-                    script_controller.validate_script(consumer, msg.action_type.crc);
+                    script_controller.commit_section(consumer, msg.action_type.crc);
+                    editing = false;
                     break;
 
                 default:
@@ -185,14 +193,16 @@ static void eeprom_poll(void* arg)
             }
         }
 
+        if(editing) { 
+            continue;
+        }
+
         if(script_controller.script_valid())
         {
             if(!cached_valid)
                 script_controller.commit_script();
             cached_valid = true;
 
-            //double-check that eeprom is valid
-            vTaskDelay(50 / portTICK_PERIOD_MS);
             bool eeprom_valid = script_controller.confirm_eeprom();
             if(!eeprom_valid)
                 cached_valid = false;
@@ -205,7 +215,7 @@ static void eeprom_poll(void* arg)
                 cached_valid = true;
             }
         }
-        vTaskDelay(1 / portTICK_PERIOD_MS);
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
 }
 

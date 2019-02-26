@@ -19,6 +19,7 @@ eeprom_file_controller::eeprom_file_controller(size_t metadata_page,
 bool eeprom_file_controller::validate_self() {
     if(!populate_metadata())
     {
+        set_validated(false);
         return false;
     }
     return validate(m_metadata.length, m_metadata.crc);
@@ -43,19 +44,9 @@ bool eeprom_file_controller::populate_metadata(void)
 
 }
 
-
-bool eeprom_file_controller::get_metadata(file_metadata& data)
-{
-    if(!populate_metadata() )
-    {
-        return false;
-    }
-    data = m_metadata;
-    return true;
-}
-
 bool eeprom_file_controller::commit_changes(uint32_t new_len, uint16_t new_crc)
 {
+    ESP_LOGE(m_Tag, "commiting new section with len %d, crc %d", new_len, new_crc); 
     file_metadata new_metadata;
     new_metadata.crc = new_crc;
     new_metadata.length = new_len;
@@ -67,7 +58,7 @@ bool eeprom_file_controller::write_metadata(const file_metadata &new_metadata)
     uint32_t offset = 0;
     offset += babel::serialize_u32(&(raw_buf[offset]), new_metadata.length);
     offset += babel::serialize_u16(&(raw_buf[offset]), new_metadata.crc);
-    if(!write_data(
+    if(!write_page(
                 raw_buf,
                 m_metadataPage,
                 offset) ) 
@@ -81,14 +72,17 @@ bool eeprom_file_controller::write_metadata(const file_metadata &new_metadata)
 
 bool eeprom_file_controller::confirm_valid(void)
 {
+    const file_metadata old_data = m_metadata; 
     if(!validated())
     {
-        return false;
+        goto error;
     }
-    const file_metadata old_data = m_metadata; 
-    if(!populate_metadata()) return false;
-    if(old_data.crc != m_metadata.crc) return false;
-
+    if(!populate_metadata()) goto error;
+    if(old_data.crc != m_metadata.crc) goto error;
+    set_validated(true);
     return true;
+error:
+    set_validated(false);
+    return false;
 }
 

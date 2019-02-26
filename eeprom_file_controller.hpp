@@ -15,7 +15,6 @@ class eeprom_file_controller: public eeprom_utils {
         eeprom_file_controller(size_t metadata_page, size_t init_page);
         eeprom_file_controller(size_t metadata_page);
         virtual bool populate_metadata(void);
-        bool get_metadata(file_metadata& data);
         uint16_t get_cached_crc(void) { return m_metadata.crc;} 
         uint16_t get_cached_length(void) { return m_metadata.length; }
         bool write_metadata(const file_metadata &new_metadata);

@@ -24,6 +24,7 @@ class eeprom_cal_controller: public eeprom_utils {
         virtual bool commit_changes(uint32_t new_len, uint16_t new_crc); 
         float get_cal_data(char* key);
         bool populate_cal_data(void);
+        void predict_begin_page(size_t total_length); 
     private:
         std::map<std::string,float> m_CalData;
         cal_metadata m_metadata;
