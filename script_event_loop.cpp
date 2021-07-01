@@ -23,7 +23,7 @@ extern "C" {
 #include "uart_programmer.h"
 #include "display_manager.h"
 #include "sample_capture.h"
-#include "gatts_demo.h"
+#include "bt.h"
 }
 #include "script_event_loop.hpp"
 #include "script_controller.hpp"

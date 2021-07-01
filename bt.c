@@ -25,7 +25,7 @@
 #include "esp_log.h"
 #include "nvs_flash.h"
 
-#include "gatts_demo.h"
+#include "bt.h"
 
 #include "esp_bt.h"
 #include "esp_gap_ble_api.h"

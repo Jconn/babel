@@ -1,6 +1,6 @@
 #include "display_manager.h"
 #include "esp_log.h"
-#include "gatts_demo.h"
+#include "bt.h"
 #include "u8g2.h"
 #include "u8g2_esp32_hal.h"
 #include "ads1118.h"
